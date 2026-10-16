@@ -212,7 +212,7 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 
 ---
 
-### 🇻🇳 Vietnam (BIDV Transfer & VietQR)
+### <img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f1fb-1f1f3.svg" width="22" height="22" alt="Vietnam Flag" style="vertical-align: middle;"> Vietnam (BIDV Transfer & VietQR)
 
 | Bank Details | Information |
 | :--- | :--- |
