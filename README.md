@@ -33,6 +33,7 @@
   - [3. Hotkeys & CLI Commands](#3-hotkeys--cli-commands)
 - [How It Works (Architecture)](#-how-it-works-architecture)
 - [Developer Guide (Building from Source)](#-developer-guide-building-from-source)
+- [Support & Sponsorship](#-support--sponsorship)
 - [License & Ownership](#-license--ownership)
 - [Built with AI](#-built-with-ai)
 
@@ -197,6 +198,39 @@ python build.py
 # Or double-click build.bat
 ```
 The compiled single-file binary will be generated at `dist/LivelyWallpaperShuffler.exe`.
+
+---
+
+## 💖 Support & Sponsorship
+
+If you find **Lively Wallpaper Shuffler** helpful and would like to support its ongoing development, donations are gratefully appreciated!
+
+### 🌍 International (PayPal)
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal&style=for-the-badge)](https://paypal.me/YOUR_PAYPAL_USERNAME)
+
+> **Link:** [paypal.me/YOUR_PAYPAL_USERNAME](https://paypal.me/YOUR_PAYPAL_USERNAME)
+
+---
+
+### 🇻🇳 Vietnam (Vietcombank Transfer & VietQR)
+
+| Bank Details | Information |
+| :--- | :--- |
+| **Ngân hàng (Bank)** | Joint Stock Commercial Bank for Foreign Trade of Vietnam (Vietcombank - VCB) |
+| **Số tài khoản (Account No.)** | `YOUR_VCB_ACCOUNT_NUMBER` |
+| **Chủ tài khoản (Account Name)** | `YOUR_FULL_NAME` |
+| **Nội dung (Transfer Memo)** | `Lively Shuffler Support` |
+
+<details>
+<summary>📱 <strong>Scan VietQR Code (Click to Expand)</strong></summary>
+
+<br>
+
+<p align="center">
+  <img src="https://img.vietqr.io/image/vietcombank-YOUR_VCB_ACCOUNT_NUMBER-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=YOUR_FULL_NAME" alt="Vietcombank VietQR Code" width="300">
+</p>
+
+</details>
 
 ---
 

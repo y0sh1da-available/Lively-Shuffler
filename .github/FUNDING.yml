@@ -1,0 +1,5 @@
+# GitHub Sponsor Configuration
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+# Replace YOUR_PAYPAL_USERNAME with your PayPal.me handle (e.g. https://paypal.me/yourname)
+custom: ['https://paypal.me/YOUR_PAYPAL_USERNAME']
