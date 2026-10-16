@@ -28,7 +28,6 @@
 - [Command Line & Hotkey Actions](#-command-line--hotkey-actions)
 - [How It Works (Architecture)](#-how-it-works-architecture)
 - [Developer Guide (Building from Source)](#-developer-guide-building-from-source)
-- [How to Release on GitHub](#-how-to-release-on-github)
 - [License & Ownership](#-license--ownership)
 
 ---
@@ -161,33 +160,6 @@ python build.py
 # Or double-click build.bat
 ```
 The output will be generated at `dist/LivelyWallpaperShuffler.exe`.
-
----
-
-## 🚢 How to Release on GitHub
-
-There are two ways to release a new version on GitHub:
-
-### Option A: Automated Release (Recommended)
-This repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that compiles the standalone executable on Windows and creates a GitHub Release automatically:
-
-1. Create a git tag for your release (e.g. `v1.0.0`):
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-2. GitHub Actions will automatically:
-   - Build on a `windows-latest` virtual runner.
-   - Compile `LivelyWallpaperShuffler.exe`.
-   - Compute SHA-256 checksums (`checksums.txt`).
-   - Create a GitHub Release and attach the executable.
-
-### Option B: Manual Release
-1. Build the executable locally with `python build.py`.
-2. Go to **[Releases -> Draft a new release](https://github.com/y0sh1da-available/Lively-Shuffler/releases/new)**.
-3. Enter tag version (e.g. `v1.0.0`) and title.
-4. Drag and drop `dist/LivelyWallpaperShuffler.exe` into the asset attachments box.
-5. Click **Publish release**.
 
 ---
 
