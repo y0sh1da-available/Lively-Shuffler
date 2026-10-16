@@ -40,8 +40,10 @@ def build():
         f"--icon={ICON_FILE}",
         f"--add-data={ICON_FILE};.",
         f"--add-data={PNG_ICON};.",
+        "--add-data=gui.py;.",
         "--hidden-import=pystray._win32",
         "--hidden-import=PIL._tkinter_finder",
+        "--hidden-import=tkinter",
         "--clean",
         SCRIPT_FILE,
     ]

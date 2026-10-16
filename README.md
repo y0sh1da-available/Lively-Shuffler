@@ -5,101 +5,136 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, zero-configuration Windows background companion for <a href="https://github.com/rocksdanister/lively">Lively Wallpaper</a> (v2.x+).</strong>
+  <strong>A lightweight, zero-configuration Windows companion app and background shuffler for <a href="https://github.com/rocksdanister/lively">Lively Wallpaper</a> (v2.x+).</strong>
   <br>
-  Automatically cycles and shuffles wallpapers with modern process execution and system-tray controls.
+  Features a modern GUI dashboard, visual wallpaper gallery with previews, multi-directory auto-discovery, and full system-tray controls.
 </p>
 
 <p align="center">
   <a href="https://github.com/y0sh1da-available/Lively-Shuffler/releases"><img src="https://img.shields.io/github/v/release/y0sh1da-available/Lively-Shuffler?color=success&include_prereleases&label=Release" alt="GitHub Release"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?logo=windows&logoColor=white" alt="Windows Support">
   <img src="https://img.shields.io/badge/Lively%20Wallpaper-v2.0%2B-blueviolet" alt="Lively Compatibility">
-  <img src="https://img.shields.io/badge/Made%20with-AI%20Assistance-8A2BE2.svg" alt="Made with AI Assistance">
+  <img src="https://img.shields.io/badge/Interface-GUI%20%2B%20System%20Tray-informational" alt="Interface">
   <img src="https://img.shields.io/badge/Configuration-Zero%20Config-brightgreen" alt="Zero Config">
+  <img src="https://img.shields.io/badge/Made%20with-AI%20Assistance-8A2BE2.svg" alt="Made with AI Assistance">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
 </p>
 
 ---
 
 ## 📖 Table of Contents
+- [System Requirements](#-system-requirements)
 - [Why This Utility?](#-why-this-utility)
-- [Setup Tutorial (End Users)](#-setup-tutorial-end-users)
-- [System Tray Controls](#-system-tray-controls)
-- [Command Line & Hotkey Actions](#-command-line--hotkey-actions)
+- [Setup Tutorial](#-setup-tutorial)
+- [How to Use](#-how-to-use)
+  - [1. Modern GUI Dashboard](#1-modern-gui-dashboard)
+  - [2. System Tray Controls](#2-system-tray-controls)
+  - [3. Hotkeys & CLI Commands](#3-hotkeys--cli-commands)
 - [How It Works (Architecture)](#-how-it-works-architecture)
 - [Developer Guide (Building from Source)](#-developer-guide-building-from-source)
 - [License & Ownership](#-license--ownership)
+- [Built with AI](#-built-with-ai)
+
+---
+
+## 💻 System Requirements
+
+| Component | Requirement |
+| :--- | :--- |
+| **Operating System** | Windows 10 (Build 1809+) or Windows 11 (64-bit) |
+| **Lively Wallpaper** | Version **2.0 or newer** (Desktop Installer or Microsoft Store Edition) |
+| **Runtimes** | **None** — Standalone single-file executable (`.exe`). Python is not required. |
 
 ---
 
 ## 💡 Why This Utility?
 
-Older community shufflers (like *lively-wallpaper-playlist*) rely on an obsolete IPC TCP socket (`port 65432`) and hardcoded directory paths that are **broken** on modern Lively v2.x+ installations.
+Legacy community shufflers (such as *lively-wallpaper-playlist*) rely on an obsolete IPC socket protocol (`port 65432`) and hardcoded directory paths that fail on modern Lively Wallpaper v2.x+ installations.
 
-**Lively Wallpaper Shuffler** solves this natively:
-- **Direct Process Execution:** Modern Lively Wallpaper accepts commands directly:
+**Lively Wallpaper Shuffler** interfaces directly with modern Lively:
+- **Direct Process Execution:** Sends native command-line instructions:
   ```cmd
   "<Lively_Directory>\Lively.exe" setwp --file "<Wallpaper_Folder_Path>"
   ```
-- **Zero Configuration:** Dynamically finds your Lively installation and wallpapers directory without manual setup.
-- **Silent Background Operation:** Commands run completely invisibly (`CREATE_NO_WINDOW`) so no command prompt windows flash on screen.
-- **Self-Contained Executable:** No Python runtime, installers, or dependencies needed. Single `.exe` download.
+- **Zero Configuration:** Dynamically finds your running Lively binary and scans all library paths without asking you to type paths.
+- **Full Custom Wallpaper Support:** Automatically scans both default pre-installed wallpapers (`wallpapers\`) and your imported custom wallpapers (`SaveData\wptmp\`).
+- **Silent Background Operation:** Commands run invisibly (`CREATE_NO_WINDOW`) so no command prompt windows flash on screen.
+- **Standalone Portable Executable:** Download, run, and enjoy. No installers or administrative privileges required.
 
 ---
 
-## 🚀 Setup Tutorial (End Users)
-
-Follow these simple steps to start shuffling wallpapers in under 30 seconds:
+## 🚀 Setup Tutorial
 
 ### Step 1: Download
-Go to the **[GitHub Releases page](https://github.com/y0sh1da-available/Lively-Shuffler/releases)** and download **`LivelyWallpaperShuffler.exe`**.
+Download **`LivelyWallpaperShuffler.exe`** from the **[Latest Releases](https://github.com/y0sh1da-available/Lively-Shuffler/releases)** page.
 
-### Step 2: Run
-Double-click `LivelyWallpaperShuffler.exe`.
-- The app runs silently in your Windows System Tray (near the clock on your taskbar).
-- A notification will appear displaying how many wallpapers were discovered in your Lively library.
+### Step 2: Run the Application
+1. Make sure **Lively Wallpaper** is installed and running.
+2. Double-click **`LivelyWallpaperShuffler.exe`**.
+3. The modern **Dashboard GUI** will appear, and a companion icon will appear in your **Windows System Tray** (near the clock).
 
-### Step 3: Configure (Optional)
-Right-click the icon in your system tray:
-- **Set Shuffle Interval:** Go to `Interval` and select your preferred cycle time (e.g., `5 minutes`, `15 minutes`, `1 hour`).
-- **Choose Shuffle Mode:** Under `Mode`, select `Shuffle (Random)` or `Sequential (In Order)`.
-- **Enable Start with Windows:** Check **"Start with Windows"** so the shuffler runs automatically every time you log in.
-
-> **Tip:** Double-clicking the tray icon or selecting **"Next Wallpaper"** will immediately switch to the next wallpaper.
+### Step 3: Configure Autostart (Optional)
+In the dashboard sidebar or by right-clicking the tray icon, check **"Start with Windows"**.  
+*When enabled, the app launches quietly in the system tray every time you log in to Windows.*
 
 ---
 
-## 🎛️ System Tray Controls
+## 🎮 How to Use
+
+### 1. Modern GUI Dashboard
+Double-click `LivelyWallpaperShuffler.exe` or click **"Open Dashboard"** from the system tray menu to open the dashboard window.
+
+- **Now Playing Card:** Displays the current active wallpaper with high-resolution thumbnail preview, title, author, and an *Open Folder* shortcut.
+- **Quick Controls:**
+  - **⏭ Next Wallpaper:** Immediately cycle to the next wallpaper.
+  - **⏮ Previous:** Revisit previously shuffled wallpapers in your history.
+  - **⏸ Pause / Resume:** Pause the timer loop on your favorite wallpaper or resume shuffling.
+- **Interval Presets:** Quick dropdown selector for `30 seconds`, `1 minute`, `5 minutes`, `10 minutes`, `15 minutes`, `30 minutes`, `1 hour`, `2 hours`, or `4 hours`.
+- **Shuffle Mode:** Choose between **Shuffle (Random)** or **Sequential (In Order)**.
+- **Wallpaper Gallery:**
+  - Visual grid of all wallpapers (default + imported + custom).
+  - Live search bar to quickly filter wallpapers by name or author.
+  - Click any card to **instantly set it as your active wallpaper**.
+- **+ Add Folder Button:** Browse and link external folders containing wallpapers or video clips (`.mp4`, `.webm`, `.mkv`, `.gif`).
+- **Minimize to Tray:** Clicking the window's close (`X`) button hides the dashboard to the system tray so it runs quietly in the background.
+
+---
+
+### 2. System Tray Controls
+Right-click the tray icon near the Windows clock to access quick actions:
 
 | Menu Item | Action |
 | :--- | :--- |
-| **Current: [Title]** | Shows the active wallpaper. Click it to open its folder in File Explorer. |
-| **Next Wallpaper** | Immediately switch to the next wallpaper (Default double-click action). |
-| **Previous Wallpaper** | Go back to previously viewed wallpapers in this session. |
-| **Pause / Resume** | Freeze on the current wallpaper or resume the timer cycle. |
-| **Interval** | Quick presets: `30 sec`, `1 min`, `5 min`, `10 min`, `15 min`, `30 min`, `1 hr`, `2 hr`, `4 hr`. |
-| **Mode** | Toggle between `Shuffle (Random)` and `Sequential (In Order)`. |
-| **Wallpapers (N)** | Browse and instantly switch to any specific wallpaper in your library. |
-| **Open Wallpapers Folder** | Opens your active Lively wallpaper library folder in File Explorer. |
-| **Start with Windows** | Configures automatic background startup in Windows Registry (`HKCU\...\Run`). |
+| **Open Dashboard** | Opens the visual GUI Dashboard (Default double-click action). |
+| **Current: [Title]** | Shows the active wallpaper name; click to open the GUI. |
+| **Next Wallpaper** | Immediately switch to the next wallpaper. |
+| **Previous Wallpaper** | Step backward in shuffle history. |
+| **Pause / Resume** | Freeze on the current wallpaper or resume the timer loop. |
+| **Interval** | Select cycle duration presets. |
+| **Mode** | Toggle between Shuffle (Random) and Sequential. |
+| **Wallpapers (N)** | Quick-pick dropdown listing all wallpapers in your library. |
+| **Open Wallpapers Folder** | Opens your active Lively library folder in File Explorer. |
+| **Start with Windows** | Toggle automatic startup via Windows Registry (`HKCU\...\Run`). |
 | **Reload Wallpapers** | Re-scans library folders when you add or delete wallpapers. |
-| **Exit** | Shuts down the background timer loop and closes the system tray icon cleanly. |
+| **Exit** | Shuts down the background timer and closes the application completely. |
 
 ---
 
-## ⚡ Command Line & Hotkey Actions
-
-You can map keyboard shortcuts (e.g. via AutoHotkey, PowerToys Keyboard Manager, or Stream Deck) directly to these one-shot CLI commands:
+### 3. Hotkeys & CLI Commands
+You can map keyboard shortcuts (e.g. using AutoHotkey, Windows shortcuts, or Stream Deck) directly to these one-shot command-line actions:
 
 ```cmd
-:: Immediately jump to next wallpaper and exit
+:: Switch to next wallpaper immediately and exit
 LivelyWallpaperShuffler.exe --next
 
-:: Immediately return to previous wallpaper and exit
+:: Switch to previous wallpaper immediately and exit
 LivelyWallpaperShuffler.exe --prev
 
-:: Inspect detected Lively path, wallpapers directory, and active wallpaper
+:: Print detected Lively path, library folder, and active wallpaper
 LivelyWallpaperShuffler.exe --status
+
+:: Start directly in system tray without opening the GUI window
+LivelyWallpaperShuffler.exe --minimized
 
 :: Display CLI help
 LivelyWallpaperShuffler.exe --help
@@ -109,29 +144,19 @@ LivelyWallpaperShuffler.exe --help
 
 ## 🔍 How It Works (Architecture)
 
-```mermaid
-flowchart TD
-    A[Start App] --> B{Check Single Instance Mutex}
-    B -- Already Running --> C[Notify User & Exit]
-    B -- First Instance --> D[Auto-Discovery Engine]
-    D --> E[Detect Lively.exe via Win32 Snapshot / Paths / Registry]
-    D --> F[Detect Wallpaper Library via Settings.json / Default AppData]
-    D --> G[Sync Current Wallpaper from WallpaperLayout.json]
-    G --> H[Start Background Timer Thread]
-    G --> I[Initialize System Tray Icon & Context Menu]
-    H --> J[On Interval / Trigger: Silent Process Execution 'setwp --file ...']
-```
-
-### Auto-Discovery Rules
+### Multi-Directory Discovery
 1. **Lively Executable Detection:**
-   - Queries active processes via Win32 Toolhelp snapshot (`CreateToolhelp32Snapshot`) to find the running `Lively.exe`.
-   - Checks user-level install: `%LOCALAPPDATA%\Programs\Lively Wallpaper\Lively.exe`.
-   - Checks system-wide install: `C:\Program Files\Lively Wallpaper\Lively.exe`.
-   - Checks Windows Registry `App Paths\Lively.exe`.
-2. **Library Detection:**
-   - Parses `%LOCALAPPDATA%\Lively Wallpaper\Settings.json` for custom directory configurations (`WallpaperDir`).
-   - Defaults to `%LOCALAPPDATA%\Lively Wallpaper\Library\wallpapers`.
-   - Reads `LivelyInfo.json` in each subfolder to extract title, author, and wallpaper type.
+   - Win32 Toolhelp snapshot (`CreateToolhelp32Snapshot` & `QueryFullProcessImageNameW`) inspects running processes to locate `Lively.exe` or companion processes.
+   - Fallback scans standard installation paths (`%LOCALAPPDATA%\Programs\Lively Wallpaper\Lively.exe`, `%ProgramFiles%\Lively Wallpaper\`, and Windows Registry `App Paths`).
+2. **Wallpaper Library Resolution:**
+   - Inspects `%LOCALAPPDATA%\Lively Wallpaper\Settings.json` for custom `WallpaperDir`.
+   - Scans `%LOCALAPPDATA%\Lively Wallpaper\Library\wallpapers` (default wallpapers).
+   - Scans `%LOCALAPPDATA%\Lively Wallpaper\Library\SaveData\wptmp` (custom user-imported wallpapers).
+   - Validates subfolders containing `LivelyInfo.json` to extract titles, authors, and preview thumbnails.
+   - Supports user-added custom folders in `config.json`.
+3. **Synchronization & Single-Instance:**
+   - Reads `WallpaperLayout.json` to detect active wallpapers across multi-monitor setups.
+   - Enforces a named Win32 mutex (`Global\LivelyWallpaperShuffler_SingleInstance_Mutex`) to prevent duplicate instances.
 
 ---
 
@@ -139,27 +164,23 @@ flowchart TD
 
 ### Prerequisites
 - Windows 10 or 11
-- Python 3.10 or newer
+- Python 3.10+
+- Git
 
-### Setup
+### Setup & Run
 ```bash
 git clone https://github.com/y0sh1da-available/Lively-Shuffler.git
 cd Lively-Shuffler
 pip install -r requirements.txt
-```
-
-### Run Directly
-```bash
 python lively_shuffler.py
 ```
 
 ### Compile Standalone Executable
-You can compile into a single-file executable using the automated build script:
 ```bash
 python build.py
 # Or double-click build.bat
 ```
-The output will be generated at `dist/LivelyWallpaperShuffler.exe`.
+The compiled single-file binary will be generated at `dist/LivelyWallpaperShuffler.exe`.
 
 ---
 
@@ -181,4 +202,4 @@ Licensed under the **[MIT License](LICENSE)**.
 This project was designed, implemented, and refined with **AI assistance** (Google DeepMind Antigravity pair programming), conceived and maintained by **y0sh1da-available**.
 
 ---
-*Lively Wallpaper is an open-source project by [rocksdanister](https://github.com/rocksdanister/lively).*
+*Lively Wallpaper is an open-source project created by [rocksdanister](https://github.com/rocksdanister/lively).*

@@ -287,8 +287,8 @@ class AutostartManager:
             ) as key:
                 if enable:
                     exe_path = sys.executable
-                    # Quote path if needed
-                    val = f'"{exe_path}"'
+                    # Quote path and start minimized in system tray
+                    val = f'"{exe_path}" --minimized'
                     winreg.SetValueEx(key, cls.APP_KEY_NAME, 0, winreg.REG_SZ, val)
                     logger.info("Enabled auto-start with Windows: %s", val)
                 else:
@@ -337,10 +337,25 @@ class ShufflerController:
         self.is_running = True
         self.worker_thread: threading.Thread | None = None
         self.tray_icon: pystray.Icon | None = None
+        self.gui = None
+        self.custom_directories: list[str] = []
 
         self.load_config()
         self.discover_environment()
         self.scan_wallpapers()
+
+    @staticmethod
+    def get_interval_presets():
+        return INTERVAL_PRESETS
+
+    def add_custom_directory(self, folder: str):
+        """Add a custom wallpaper folder and save to config."""
+        if folder and os.path.isdir(folder):
+            norm = os.path.normcase(os.path.abspath(folder))
+            if norm not in [os.path.normcase(os.path.abspath(d)) for d in self.custom_directories]:
+                self.custom_directories.append(folder)
+                self.save_config()
+                logger.info("Added custom wallpaper directory: %s", folder)
 
     def load_config(self):
         """Load user preferences from config file."""
@@ -351,6 +366,7 @@ class ShufflerController:
                     self.interval_seconds = cfg.get("interval_seconds", 300)
                     self.mode = cfg.get("mode", "shuffle")
                     self.is_paused = cfg.get("is_paused", False)
+                    self.custom_directories = cfg.get("custom_directories", [])
             except Exception as e:
                 logger.error("Failed loading config: %s", e)
         self.start_with_windows = AutostartManager.is_enabled()
@@ -363,6 +379,7 @@ class ShufflerController:
                 "mode": self.mode,
                 "is_paused": self.is_paused,
                 "start_with_windows": self.start_with_windows,
+                "custom_directories": self.custom_directories,
             }
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -485,6 +502,7 @@ class ShufflerController:
                 self.current_wallpaper = wallpaper
                 logger.info("Successfully switched wallpaper to: %s", wallpaper.title)
                 self.update_tray_tooltip()
+                self.notify_gui()
                 return True
             else:
                 logger.warning(
@@ -496,6 +514,14 @@ class ShufflerController:
         except Exception as e:
             logger.error("Failed to execute Lively command: %s", e)
             return False
+
+    def notify_gui(self):
+        """Thread-safe UI update trigger."""
+        if self.gui and hasattr(self.gui, "root"):
+            try:
+                self.gui.root.after(0, self.gui.refresh_ui)
+            except Exception:
+                pass
 
     def next_wallpaper(self, explicit_user_trigger: bool = True):
         """Advance to the next wallpaper based on current mode."""
@@ -571,6 +597,7 @@ class ShufflerController:
         self.save_config()
         self.update_tray_tooltip()
         self.wake_event.set()
+        self.notify_gui()
         logger.info("Shuffler pause state toggled to: %s", self.is_paused)
 
     def set_interval(self, seconds: int):
@@ -579,6 +606,7 @@ class ShufflerController:
         self.save_config()
         self.update_tray_tooltip()
         self.wake_event.set()
+        self.notify_gui()
         logger.info("Interval changed to: %d seconds", seconds)
 
     def set_mode(self, mode: str):
@@ -587,6 +615,7 @@ class ShufflerController:
             self.mode = mode
             self.save_config()
             self.wake_event.set()
+            self.notify_gui()
             logger.info("Mode changed to: %s", mode)
 
     def toggle_start_with_windows(self):
@@ -594,6 +623,7 @@ class ShufflerController:
         self.start_with_windows = not self.start_with_windows
         AutostartManager.set_enabled(self.start_with_windows)
         self.save_config()
+        self.notify_gui()
 
     def update_tray_tooltip(self):
         """Update system tray tooltip and menu labels."""
@@ -743,9 +773,19 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
         controller.scan_wallpapers()
         controller.update_tray_tooltip()
 
+    def on_open_dashboard(icon, item):
+        if controller.gui:
+            controller.gui.root.after(0, controller.gui.show_window)
+
     def on_exit(icon, item):
         controller.stop()
-        icon.stop()
+        if icon:
+            icon.stop()
+        if controller.gui and hasattr(controller.gui, "root"):
+            try:
+                controller.gui.root.after(0, controller.gui.root.destroy)
+            except Exception:
+                pass
 
     # Dynamic Menu Generators
     def get_interval_items():
@@ -798,10 +838,10 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
         pause_label = "Resume Shuffle" if controller.is_paused else "Pause Shuffle"
         wallpapers_menu_title = f"Wallpapers ({len(controller.wallpapers)})"
 
-        yield pystray.MenuItem(f"{APP_NAME} v{APP_VERSION}", lambda i, item: None, enabled=False)
-        yield pystray.MenuItem(curr_label, on_open_folder)
+        yield pystray.MenuItem("Open Dashboard", on_open_dashboard, default=True)
+        yield pystray.MenuItem(curr_label, on_open_dashboard)
         yield pystray.Menu.SEPARATOR
-        yield pystray.MenuItem("Next Wallpaper", on_next, default=True)
+        yield pystray.MenuItem("Next Wallpaper", on_next)
         yield pystray.MenuItem("Previous Wallpaper", on_prev)
         yield pystray.MenuItem(
             pause_label,
@@ -856,10 +896,11 @@ def handle_cli_args(args: list[str]) -> bool:
     if arg in ("--help", "-h", "/?"):
         print(f"{APP_NAME} v{APP_VERSION}")
         print("Usage:")
-        print("  LivelyWallpaperShuffler.exe          Launch background system tray shuffler")
-        print("  LivelyWallpaperShuffler.exe --next   Immediately switch to next wallpaper and exit")
-        print("  LivelyWallpaperShuffler.exe --prev   Switch to previous wallpaper and exit")
-        print("  LivelyWallpaperShuffler.exe --status Show detected environment & active wallpaper")
+        print("  LivelyWallpaperShuffler.exe             Launch GUI dashboard & system tray")
+        print("  LivelyWallpaperShuffler.exe --minimized Launch directly to system tray")
+        print("  LivelyWallpaperShuffler.exe --next      Immediately switch to next wallpaper and exit")
+        print("  LivelyWallpaperShuffler.exe --prev      Switch to previous wallpaper and exit")
+        print("  LivelyWallpaperShuffler.exe --status    Show detected environment & active wallpaper")
         return True
 
     if arg in ("--status", "-s"):
@@ -913,24 +954,26 @@ def main():
         controller = ShufflerController()
         controller.start()
 
-        # Build & launch system tray icon
+        # Build & launch system tray icon in detached thread
         tray_icon = build_system_tray(controller)
         controller.update_tray_tooltip()
+        tray_icon.run_detached()
 
-        # Display initial startup balloon notification
-        if controller.wallpapers:
-            tray_icon.notify(
-                f"Lively Shuffler is active! Found {len(controller.wallpapers)} wallpapers.\nInterval: {ShufflerController.format_interval(controller.interval_seconds)} ({controller.mode.capitalize()})",
-                title="Lively Wallpaper Shuffler",
-            )
+        # Initialize Tkinter GUI Dashboard
+        import tkinter as tk
+        from gui import ShufflerGUI
+        root = tk.Tk()
+        gui = ShufflerGUI(controller, root)
+        controller.gui = gui
+
+        # If started with --minimized flag (e.g. from Windows startup), hide to tray
+        if "--minimized" in sys.argv:
+            root.withdraw()
         else:
-            tray_icon.notify(
-                "Running in system tray, but no wallpapers found in Lively library.",
-                title="Lively Wallpaper Shuffler",
-            )
+            gui.show_window()
 
-        # Run tray loop (blocking call on main thread)
-        tray_icon.run()
+        # Run Tk main loop (blocking call on main thread)
+        root.mainloop()
 
     except Exception as e:
         logger.exception("Fatal error in main: %s", e)
