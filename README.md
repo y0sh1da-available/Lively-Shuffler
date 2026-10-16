@@ -150,6 +150,9 @@ LivelyWallpaperShuffler.exe --prev
 :: Print detected Lively path, library folder, and active wallpaper
 LivelyWallpaperShuffler.exe --status
 
+:: Configure a custom Lively.exe location and exit
+LivelyWallpaperShuffler.exe --set-lively "D:\Lively Wallpaper\Lively.exe"
+
 :: Start directly in system tray without opening the GUI window
 LivelyWallpaperShuffler.exe --minimized
 
@@ -161,18 +164,28 @@ LivelyWallpaperShuffler.exe --help
 
 ## 🔍 How It Works (Architecture)
 
-### Multi-Directory Discovery
+### Multi-Tier Auto-Discovery Engine
+Lively Wallpaper Shuffler automatically finds your installation, regardless of how or where you installed it:
+
 1. **Lively Executable Detection:**
-   - Win32 Toolhelp snapshot (`CreateToolhelp32Snapshot` & `QueryFullProcessImageNameW`) inspects running processes to locate `Lively.exe` or companion processes.
-   - Fallback scans standard installation paths (`%LOCALAPPDATA%\Programs\Lively Wallpaper\Lively.exe`, `%ProgramFiles%\Lively Wallpaper\`, and Windows Registry `App Paths`).
+   - **User Custom Override:** Checks `config.json` for any user-configured executable path.
+   - **Active Process Snapshot:** Uses Win32 Toolhelp API (`CreateToolhelp32Snapshot` & `QueryFullProcessImageNameW`) to detect `Lively.exe` or companion processes running on **any drive or folder** (including portable or custom drives).
+   - **Microsoft Store Edition:** Scans Store execution aliases (`%LOCALAPPDATA%\Microsoft\WindowsApps\Lively.exe`) and Store package directories (`%LOCALAPPDATA%\Packages\12030rocksdanister.LivelyWallpaper_*\`).
+   - **Windows Registry Uninstall Keys:** Inspects `HKCU` and `HKLM` `Uninstall` registry keys to find custom installation paths (`InstallLocation` and `DisplayIcon`).
+   - **Windows Registry App Paths:** Checks `HKCU` and `HKLM` `App Paths\Lively.exe`.
+   - **Standard & Multi-Drive Fallback:** Checks standard directories (`%LOCALAPPDATA%\Programs\Lively Wallpaper\`, `%ProgramFiles%\Lively Wallpaper\`, `D:\`, `E:\`, and adjacent portable folders).
+   - **Manual GUI Locator:** If ever needed, click the **Locate...** button in the dashboard or run `--set-lively <path>` to pick your executable.
+
 2. **Wallpaper Library Resolution:**
-   - Inspects `%LOCALAPPDATA%\Lively Wallpaper\Settings.json` for custom `WallpaperDir`.
-   - Scans `%LOCALAPPDATA%\Lively Wallpaper\Library\wallpapers` (default wallpapers).
-   - Scans `%LOCALAPPDATA%\Lively Wallpaper\Library\SaveData\wptmp` (custom user-imported wallpapers).
+   - Detects data directories from both standard installations and Microsoft Store package AppData (`%LOCALAPPDATA%\Packages\12030rocksdanister.LivelyWallpaper_*\LocalCache\Local\Lively Wallpaper`).
+   - Parses `Settings.json` in all detected data directories to discover custom `WallpaperDir` folders.
+   - Scans built-in default library (`.../Library/wallpapers`).
+   - Scans user-imported live wallpapers (`.../Library/SaveData/wptmp`).
    - Validates subfolders containing `LivelyInfo.json` to extract titles, authors, and preview thumbnails.
-   - Supports user-added custom folders in `config.json`.
+   - Fully supports user-added custom directories via the GUI **+ Add Folder** button or `config.json`.
+
 3. **Synchronization & Single-Instance:**
-   - Reads `WallpaperLayout.json` to detect active wallpapers across multi-monitor setups.
+   - Reads `WallpaperLayout.json` across standard and Store data directories to detect active wallpapers across multi-monitor setups.
    - Enforces a named Win32 mutex (`Global\LivelyWallpaperShuffler_SingleInstance_Mutex`) to prevent duplicate instances.
 
 ---
@@ -219,7 +232,6 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 | **Ngân hàng (Bank)** | Bank for Investment and Development of Vietnam (BIDV) |
 | **Số tài khoản (Account No.)** | `4605007300` |
 | **Chủ tài khoản (Account Name)** | `DANG HUU CUONG` |
-| **Nội dung (Transfer Memo)** | `Lively Shuffler Support` |
 
 <details>
 <summary>📱 <strong>Scan VietQR Code (Click to Expand)</strong></summary>
@@ -227,7 +239,7 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 <br>
 
 <p align="center">
-  <img src="https://img.vietqr.io/image/bidv-4605007300-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=DANG%20HUU%20CUONG" alt="BIDV VietQR Code" width="300">
+  <img src="https://img.vietqr.io/image/bidv-4605007300-compact2.png?amount=0&accountName=DANG%20HUU%20CUONG" alt="BIDV VietQR Code" width="300">
 </p>
 
 </details>

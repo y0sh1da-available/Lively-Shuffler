@@ -15,6 +15,7 @@ import winreg
 import logging
 import threading
 import subprocess
+import glob
 from pathlib import Path
 from PIL import Image, ImageDraw
 import pystray
@@ -137,54 +138,207 @@ def find_lively_process_path() -> str | None:
 # ==============================================================================
 class DiscoveryEngine:
     @staticmethod
-    def find_lively_executable() -> str | None:
-        """Dynamically detect Lively executable through process snapshot, standard paths, or registry."""
-        # 1. Fallback / Priority: Check active running process
+    def get_lively_data_dirs() -> list[str]:
+        """
+        Locate all candidate AppData / data storage directories for Lively Wallpaper.
+        Supports standard Win32 desktop, Microsoft Store (UWP/MSIX), and portable installations.
+        """
+        candidates = []
+        seen = set()
+
+        def add_dir(d):
+            if d and os.path.isdir(d):
+                norm = os.path.normcase(os.path.abspath(d))
+                if norm not in seen:
+                    seen.add(norm)
+                    candidates.append(d)
+
+        # 1. Standard Win32 Desktop installer path
+        add_dir(os.path.join(LOCAL_APPDATA, "Lively Wallpaper"))
+
+        # 2. Microsoft Store (Centennial/MSIX container redirection)
+        # Typical: %LOCALAPPDATA%\Packages\12030rocksdanister.LivelyWallpaper_<id>\LocalCache\Local\Lively Wallpaper
+        store_cache_pattern = os.path.join(
+            LOCAL_APPDATA, "Packages", "*LivelyWallpaper*", "LocalCache", "Local", "Lively Wallpaper"
+        )
+        for d in glob.glob(store_cache_pattern):
+            add_dir(d)
+
+        store_state_pattern = os.path.join(
+            LOCAL_APPDATA, "Packages", "*LivelyWallpaper*", "LocalState", "Lively Wallpaper"
+        )
+        for d in glob.glob(store_state_pattern):
+            add_dir(d)
+
+        store_roaming_pattern = os.path.join(
+            LOCAL_APPDATA, "Packages", "*LivelyWallpaper*", "LocalCache", "Roaming", "Lively Wallpaper"
+        )
+        for d in glob.glob(store_roaming_pattern):
+            add_dir(d)
+
+        return candidates
+
+    @staticmethod
+    def find_lively_executable(custom_path: str | None = None) -> str | None:
+        """
+        Dynamically detect Lively executable through multiple robust tiers:
+        1. User-configured custom path (config.json)
+        2. Win32 running process snapshot (detects Lively running on ANY drive or custom folder)
+        3. Microsoft Store App Execution Alias & WindowsApps package directory
+        4. Windows Registry Uninstall Keys (custom installation drives/folders)
+        5. Windows Registry App Paths
+        6. Standard program files & multi-drive fallback directories
+        7. Adjacent portable directory
+        """
+        # --- Tier 1: Configured Custom Override ---
+        if custom_path and os.path.isfile(custom_path):
+            logger.info("Using configured custom Lively executable: %s", custom_path)
+            return custom_path
+
+        # --- Tier 2: Check active running process (Works for any drive/folder) ---
         proc_path = find_lively_process_path()
         if proc_path and os.path.isfile(proc_path):
             logger.info("Discovered Lively executable via active process: %s", proc_path)
             return proc_path
 
-        # 2. Check standard installation directories
+        # --- Tier 3: Microsoft Store Edition (App Execution Alias & Package Paths) ---
+        store_alias = os.path.join(LOCAL_APPDATA, "Microsoft", "WindowsApps", "Lively.exe")
+        if os.path.isfile(store_alias):
+            logger.info("Discovered Lively executable via MS Store App Execution Alias: %s", store_alias)
+            return store_alias
+
+        store_alias_cu = os.path.join(LOCAL_APPDATA, "Microsoft", "WindowsApps", "livelycu.exe")
+        if os.path.isfile(store_alias_cu):
+            logger.info("Discovered Lively executable via MS Store livelycu alias: %s", store_alias_cu)
+            return store_alias_cu
+
+        # Wildcard match inside WindowsApps subdirectories
+        store_wildcards = [
+            os.path.join(LOCAL_APPDATA, "Microsoft", "WindowsApps", "*LivelyWallpaper*", "Lively.exe"),
+            os.path.join(LOCAL_APPDATA, "Microsoft", "WindowsApps", "*LivelyWallpaper*", "livelycu.exe"),
+        ]
+        for pattern in store_wildcards:
+            for m in glob.glob(pattern):
+                if os.path.isfile(m):
+                    logger.info("Discovered Lively executable via MS Store pattern: %s", m)
+                    return m
+
+        # Check Program Files\WindowsApps (MSIX install folder)
         prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        try:
+            wa_matches = glob.glob(os.path.join(prog_files, "WindowsApps", "*LivelyWallpaper*", "Lively.exe"))
+            for m in wa_matches:
+                if os.path.isfile(m):
+                    logger.info("Discovered Lively executable in WindowsApps: %s", m)
+                    return m
+        except (OSError, PermissionError):
+            pass
+
+        # --- Tier 4: Windows Registry Uninstall Keys (Custom installation drives) ---
+        reg_uninstall_roots = [
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ]
+        for hive, subkey_path in reg_uninstall_roots:
+            try:
+                with winreg.OpenKey(hive, subkey_path) as root_key:
+                    num_subkeys = winreg.QueryInfoKey(root_key)[0]
+                    for i in range(num_subkeys):
+                        try:
+                            subkey_name = winreg.EnumKey(root_key, i)
+                            with winreg.OpenKey(root_key, subkey_name) as sk:
+                                display_name = ""
+                                try:
+                                    display_name, _ = winreg.QueryValueEx(sk, "DisplayName")
+                                except OSError:
+                                    pass
+
+                                is_lively = "lively" in subkey_name.lower() or "lively" in str(display_name).lower()
+                                if is_lively:
+                                    # Check InstallLocation
+                                    try:
+                                        loc, _ = winreg.QueryValueEx(sk, "InstallLocation")
+                                        if loc and os.path.isdir(loc):
+                                            for cand in ("Lively.exe", "livelycu.exe", os.path.join("app", "Lively.exe")):
+                                                cand_path = os.path.join(loc, cand)
+                                                if os.path.isfile(cand_path):
+                                                    logger.info("Discovered Lively executable via Registry Uninstall (InstallLocation): %s", cand_path)
+                                                    return cand_path
+                                    except OSError:
+                                        pass
+
+                                    # Check DisplayIcon
+                                    try:
+                                        icon_val, _ = winreg.QueryValueEx(sk, "DisplayIcon")
+                                        if icon_val:
+                                            clean_icon = icon_val.split(",")[0].strip('"').strip()
+                                            if clean_icon.lower().endswith(".exe") and os.path.isfile(clean_icon):
+                                                logger.info("Discovered Lively executable via Registry Uninstall (DisplayIcon): %s", clean_icon)
+                                                return clean_icon
+                                    except OSError:
+                                        pass
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+
+        # --- Tier 5: Windows Registry App Paths ---
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for app_name in ("Lively.exe", "livelycu.exe"):
+                try:
+                    with winreg.OpenKey(
+                        root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{app_name}"
+                    ) as key:
+                        val, _ = winreg.QueryValueEx(key, "")
+                        if val and os.path.isfile(val):
+                            logger.info("Discovered Lively executable via Registry App Paths: %s", val)
+                            return val
+                except OSError:
+                    pass
+
+        # --- Tier 6: Standard & Multi-Drive Directory Fallbacks ---
         prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        candidates = [
-            # User install (default modern desktop installer)
+        standard_candidates = [
             os.path.join(LOCAL_APPDATA, "Programs", "Lively Wallpaper", "Lively.exe"),
             os.path.join(LOCAL_APPDATA, "Programs", "Lively Wallpaper", "livelycu.exe"),
-            # System wide installs
             os.path.join(prog_files, "Lively Wallpaper", "Lively.exe"),
             os.path.join(prog_files, "Lively Wallpaper", "livelycu.exe"),
             os.path.join(prog_files_x86, "Lively Wallpaper", "Lively.exe"),
             os.path.join(prog_files_x86, "Lively Wallpaper", "livelycu.exe"),
-            # Microsoft Store version alias
-            os.path.join(LOCAL_APPDATA, "Microsoft", "WindowsApps", "Lively.exe"),
+            # Common alternative drives (D:, E:)
+            r"D:\Programs\Lively Wallpaper\Lively.exe",
+            r"D:\Program Files\Lively Wallpaper\Lively.exe",
+            r"D:\Lively Wallpaper\Lively.exe",
+            r"E:\Lively Wallpaper\Lively.exe",
         ]
-
-        for path in candidates:
+        for path in standard_candidates:
             if os.path.isfile(path):
                 logger.info("Discovered Lively executable at standard path: %s", path)
                 return path
 
-        # 3. Check Windows Registry App Paths
-        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            try:
-                with winreg.OpenKey(
-                    root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Lively.exe"
-                ) as key:
-                    val, _ = winreg.QueryValueEx(key, "")
-                    if val and os.path.isfile(val):
-                        logger.info("Discovered Lively executable via Registry App Paths: %s", val)
-                        return val
-            except OSError:
-                pass
+        # --- Tier 7: Relative / Adjacent Portable Locations ---
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            for base in (exe_dir, script_dir):
+                for rel in ("Lively.exe", "livelycu.exe", os.path.join("..", "Lively.exe"), os.path.join("..", "Lively Wallpaper", "Lively.exe")):
+                    cand = os.path.normpath(os.path.join(base, rel))
+                    if os.path.isfile(cand):
+                        logger.info("Discovered Lively executable in adjacent folder: %s", cand)
+                        return cand
+        except Exception:
+            pass
 
-        logger.warning("Could not auto-discover Lively executable.")
+        logger.warning("Could not auto-discover Lively executable across any known paths.")
         return None
 
     @staticmethod
     def find_wallpapers_directories() -> list[str]:
-        """Resolve all active wallpaper library directories (default, custom, and imported)."""
+        """
+        Resolve all active wallpaper library directories across standard Win32 desktop,
+        Microsoft Store edition, custom configured directories, and Settings.json overrides.
+        """
         dirs = []
         seen = set()
 
@@ -195,27 +349,33 @@ class DiscoveryEngine:
                     seen.add(norm)
                     dirs.append(d)
 
-        # 1. Custom WallpaperDir from Lively's Settings.json
-        settings_file = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Settings.json")
-        if os.path.isfile(settings_file):
-            try:
-                with open(settings_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    custom_dir = data.get("WallpaperDir")
-                    if custom_dir:
-                        add_dir(custom_dir)
-                        add_dir(os.path.join(custom_dir, "wallpapers"))
-                        add_dir(os.path.join(custom_dir, "SaveData", "wptmp"))
-            except Exception as e:
-                logger.warning("Failed parsing Settings.json: %s", e)
+        # 1. Scan candidate data directories (Standard AppData and MS Store Packages)
+        data_roots = DiscoveryEngine.get_lively_data_dirs()
 
-        # 2. Standard Lively library directories (both default library and user-imported SaveData/wptmp)
-        lib_dir = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Library")
-        add_dir(lib_dir)
-        add_dir(os.path.join(lib_dir, "wallpapers"))
-        add_dir(os.path.join(lib_dir, "SaveData", "wptmp"))
+        for data_root in data_roots:
+            # Check Settings.json for custom WallpaperDir configured in Lively
+            settings_file = os.path.join(data_root, "Settings.json")
+            if os.path.isfile(settings_file):
+                try:
+                    with open(settings_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        custom_dir = data.get("WallpaperDir")
+                        if custom_dir:
+                            add_dir(custom_dir)
+                            add_dir(os.path.join(custom_dir, "wallpapers"))
+                            add_dir(os.path.join(custom_dir, "SaveData", "wptmp"))
+                except Exception as e:
+                    logger.warning("Failed parsing Settings.json in %s: %s", data_root, e)
 
-        # 3. User-defined custom directories from config.json
+            # Standard subdirectories in this data root
+            lib_dir = os.path.join(data_root, "Library")
+            add_dir(lib_dir)
+            add_dir(os.path.join(lib_dir, "wallpapers"))
+            add_dir(os.path.join(lib_dir, "SaveData", "wptmp"))
+            add_dir(os.path.join(data_root, "wallpapers"))
+            add_dir(os.path.join(data_root, "SaveData", "wptmp"))
+
+        # 2. User-defined custom directories from config.json
         if os.path.isfile(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -238,36 +398,54 @@ class DiscoveryEngine:
 
     @staticmethod
     def get_currently_active_wallpaper() -> tuple[str | None, str | None]:
-        """Read WallpaperLayout.json to find the currently active wallpaper path and title."""
-        layout_file = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "WallpaperLayout.json")
-        if not os.path.isfile(layout_file):
+        """
+        Read WallpaperLayout.json across candidate data directories (Standard or Store)
+        to find the currently active wallpaper path and title.
+        Prioritizes the most recently updated layout file.
+        """
+        data_roots = DiscoveryEngine.get_lively_data_dirs()
+        layout_files = []
+        for root in data_roots:
+            lf = os.path.join(root, "WallpaperLayout.json")
+            if os.path.isfile(lf):
+                try:
+                    mtime = os.path.getmtime(lf)
+                    layout_files.append((mtime, lf))
+                except OSError:
+                    layout_files.append((0, lf))
+
+        if not layout_files:
             return None, None
 
-        try:
-            with open(layout_file, "r", encoding="utf-8") as f:
-                screens = json.load(f)
-                if isinstance(screens, list) and len(screens) > 0:
-                    info_path = screens[0].get("LivelyInfoPath")
-                    if info_path:
-                        folder_path = (
-                            info_path if os.path.isdir(info_path) else os.path.dirname(info_path)
-                        )
-                        json_file = (
-                            os.path.join(folder_path, "LivelyInfo.json")
-                            if os.path.isdir(folder_path)
-                            else info_path
-                        )
-                        title = None
-                        if os.path.isfile(json_file):
-                            try:
-                                with open(json_file, "r", encoding="utf-8") as jf:
-                                    info_data = json.load(jf)
-                                    title = info_data.get("Title")
-                            except Exception:
-                                pass
-                        return folder_path, (title or os.path.basename(folder_path))
-        except Exception as e:
-            logger.debug("Error checking active wallpaper: %s", e)
+        # Sort by modification time descending (most recent first)
+        layout_files.sort(key=lambda x: x[0], reverse=True)
+
+        for _, layout_file in layout_files:
+            try:
+                with open(layout_file, "r", encoding="utf-8") as f:
+                    screens = json.load(f)
+                    if isinstance(screens, list) and len(screens) > 0:
+                        info_path = screens[0].get("LivelyInfoPath")
+                        if info_path:
+                            folder_path = (
+                                info_path if os.path.isdir(info_path) else os.path.dirname(info_path)
+                            )
+                            json_file = (
+                                os.path.join(folder_path, "LivelyInfo.json")
+                                if os.path.isdir(folder_path)
+                                else info_path
+                            )
+                            title = None
+                            if os.path.isfile(json_file):
+                                try:
+                                    with open(json_file, "r", encoding="utf-8") as jf:
+                                        info_data = json.load(jf)
+                                        title = info_data.get("Title")
+                                except Exception:
+                                    pass
+                            return folder_path, (title or os.path.basename(folder_path))
+            except Exception as e:
+                logger.debug("Error checking active wallpaper in %s: %s", layout_file, e)
 
         return None, None
 
@@ -326,6 +504,7 @@ class WallpaperItem:
 
 class ShufflerController:
     def __init__(self):
+        self.custom_lively_exe: str | None = None
         self.lively_exe: str | None = None
         self.wallpapers_dir: str | None = None
         self.wallpapers: list[WallpaperItem] = []
@@ -366,6 +545,16 @@ class ShufflerController:
                 self.save_config()
                 logger.info("Added custom wallpaper directory: %s", folder)
 
+    def set_custom_lively_exe(self, exe_path: str):
+        """Set a user-specified Lively.exe path, persist it, and re-scan environment."""
+        if exe_path and os.path.isfile(exe_path):
+            self.custom_lively_exe = os.path.abspath(exe_path)
+            self.lively_exe = self.custom_lively_exe
+            self.save_config()
+            logger.info("Saved custom Lively executable path: %s", self.custom_lively_exe)
+            self.discover_environment()
+            self.scan_wallpapers()
+
     def load_config(self):
         """Load user preferences from config file."""
         if os.path.isfile(CONFIG_FILE):
@@ -375,6 +564,7 @@ class ShufflerController:
                     self.interval_seconds = cfg.get("interval_seconds", 300)
                     self.mode = cfg.get("mode", "shuffle")
                     self.is_paused = cfg.get("is_paused", False)
+                    self.custom_lively_exe = cfg.get("custom_lively_exe")
                     self.custom_directories = cfg.get("custom_directories", [])
             except Exception as e:
                 logger.error("Failed loading config: %s", e)
@@ -388,6 +578,7 @@ class ShufflerController:
                 "mode": self.mode,
                 "is_paused": self.is_paused,
                 "start_with_windows": self.start_with_windows,
+                "custom_lively_exe": self.custom_lively_exe,
                 "custom_directories": self.custom_directories,
             }
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -397,7 +588,7 @@ class ShufflerController:
 
     def discover_environment(self):
         """Auto-discover Lively and Wallpapers path."""
-        self.lively_exe = DiscoveryEngine.find_lively_executable()
+        self.lively_exe = DiscoveryEngine.find_lively_executable(custom_path=self.custom_lively_exe)
         self.wallpapers_dir = DiscoveryEngine.find_wallpapers_directory()
 
     def scan_wallpapers(self):
@@ -910,6 +1101,20 @@ def handle_cli_args(args: list[str]) -> bool:
         print("  LivelyWallpaperShuffler.exe --next      Immediately switch to next wallpaper and exit")
         print("  LivelyWallpaperShuffler.exe --prev      Switch to previous wallpaper and exit")
         print("  LivelyWallpaperShuffler.exe --status    Show detected environment & active wallpaper")
+        print("  LivelyWallpaperShuffler.exe --set-lively <path> Save custom Lively.exe path and exit")
+        return True
+
+    if arg == "--set-lively":
+        if len(args) < 2:
+            print('Error: Missing executable path. Example: --set-lively "D:\\Lively\\Lively.exe"')
+            return True
+        target = args[1].strip('"')
+        if not os.path.isfile(target):
+            print(f"Error: Executable file not found at: {target}")
+            return True
+        ctrl = ShufflerController()
+        ctrl.set_custom_lively_exe(target)
+        print(f"Successfully configured and saved Lively executable: {target}")
         return True
 
     if arg in ("--status", "-s"):

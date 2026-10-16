@@ -322,11 +322,30 @@ class ShufflerGUI:
         status_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
         status_box.pack(side=tk.BOTTOM, fill=tk.X)
 
+        exe_row = tk.Frame(status_box, bg=C_SIDEBAR)
+        exe_row.pack(fill=tk.X, pady=(0, 3))
+
         exe_found = bool(self.controller.lively_exe)
         exe_color = C_ACCENT_GREEN if exe_found else "#ef4444"
         exe_msg = "● Lively.exe detected" if exe_found else "● Lively.exe not found"
-        self.exe_lbl = tk.Label(status_box, text=exe_msg, font=("Segoe UI", 8), bg=C_SIDEBAR, fg=exe_color)
-        self.exe_lbl.pack(anchor="w")
+        self.exe_lbl = tk.Label(exe_row, text=exe_msg, font=("Segoe UI", 8), bg=C_SIDEBAR, fg=exe_color)
+        self.exe_lbl.pack(side=tk.LEFT)
+
+        self.locate_btn = tk.Button(
+            exe_row,
+            text="Change..." if exe_found else "Locate...",
+            font=("Segoe UI", 7, "bold"),
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_ACCENT_BLUE,
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            padx=6,
+            pady=1,
+            cursor="hand2",
+            command=self.on_locate_lively,
+        )
+        self.locate_btn.pack(side=tk.RIGHT)
 
         count = len(self.controller.wallpapers)
         self.lib_lbl = tk.Label(
@@ -703,6 +722,13 @@ class ShufflerGUI:
             fg=C_ACCENT_GREEN if count > 0 else C_ACCENT_AMBER,
         )
 
+        # Lively executable status & locate button text
+        exe_found = bool(self.controller.lively_exe)
+        exe_color = C_ACCENT_GREEN if exe_found else "#ef4444"
+        exe_msg = "● Lively.exe detected" if exe_found else "● Lively.exe not found"
+        self.exe_lbl.config(text=exe_msg, fg=exe_color)
+        self.locate_btn.config(text="Change..." if exe_found else "Locate...")
+
         # Refresh gallery
         self.filter_wallpapers()
 
@@ -765,6 +791,19 @@ class ShufflerGUI:
             self.controller.add_custom_directory(folder)
             self.controller.scan_wallpapers()
             self.thumb_cache.clear()
+            self.refresh_ui()
+
+    def on_locate_lively(self):
+        filepath = filedialog.askopenfilename(
+            title="Locate Lively Executable (Lively.exe or livelycu.exe)",
+            filetypes=[
+                ("Lively Executable", "Lively.exe;livelycu.exe"),
+                ("Executable Files", "*.exe"),
+                ("All Files", "*.*"),
+            ],
+        )
+        if filepath and os.path.isfile(filepath):
+            self.controller.set_custom_lively_exe(filepath)
             self.refresh_ui()
 
     def on_rescan_clicked(self):
