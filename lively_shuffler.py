@@ -174,9 +174,19 @@ class DiscoveryEngine:
         return None
 
     @staticmethod
-    def find_wallpapers_directory() -> str | None:
-        """Resolve the active wallpapers library directory."""
-        # 1. Check Lively's Settings.json for custom WallpaperDir
+    def find_wallpapers_directories() -> list[str]:
+        """Resolve all active wallpaper library directories (default, custom, and imported)."""
+        dirs = []
+        seen = set()
+
+        def add_dir(d):
+            if d and os.path.isdir(d):
+                norm = os.path.normcase(os.path.abspath(d))
+                if norm not in seen:
+                    seen.add(norm)
+                    dirs.append(d)
+
+        # 1. Custom WallpaperDir from Lively's Settings.json
         settings_file = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Settings.json")
         if os.path.isfile(settings_file):
             try:
@@ -184,30 +194,38 @@ class DiscoveryEngine:
                     data = json.load(f)
                     custom_dir = data.get("WallpaperDir")
                     if custom_dir:
-                        # Lively usually stores wallpapers under WallpaperDir\wallpapers
-                        candidate_sub = os.path.join(custom_dir, "wallpapers")
-                        if os.path.isdir(candidate_sub):
-                            logger.info("Discovered wallpapers dir via Settings.json: %s", candidate_sub)
-                            return candidate_sub
-                        if os.path.isdir(custom_dir):
-                            logger.info("Discovered wallpapers dir via Settings.json: %s", custom_dir)
-                            return custom_dir
+                        add_dir(custom_dir)
+                        add_dir(os.path.join(custom_dir, "wallpapers"))
+                        add_dir(os.path.join(custom_dir, "SaveData", "wptmp"))
             except Exception as e:
                 logger.warning("Failed parsing Settings.json: %s", e)
 
-        # 2. Default standard path
-        default_dir = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Library", "wallpapers")
-        if os.path.isdir(default_dir):
-            logger.info("Discovered default wallpapers directory: %s", default_dir)
-            return default_dir
+        # 2. Standard Lively library directories (both default library and user-imported SaveData/wptmp)
+        lib_dir = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Library")
+        add_dir(lib_dir)
+        add_dir(os.path.join(lib_dir, "wallpapers"))
+        add_dir(os.path.join(lib_dir, "SaveData", "wptmp"))
 
-        # 3. Alternative fallback
-        alt_dir = os.path.join(LOCAL_APPDATA, "Lively Wallpaper", "Library")
-        if os.path.isdir(alt_dir):
-            return alt_dir
+        # 3. User-defined custom directories from config.json
+        if os.path.isfile(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    for extra in cfg.get("custom_directories", []):
+                        add_dir(extra)
+            except Exception:
+                pass
 
-        logger.warning("Wallpapers library directory not found.")
-        return None
+        return dirs
+
+    @staticmethod
+    def find_wallpapers_directory() -> str | None:
+        """Return the primary wallpapers directory for UI Explorer navigation."""
+        dirs = DiscoveryEngine.find_wallpapers_directories()
+        for d in dirs:
+            if d.lower().endswith("wallpapers"):
+                return d
+        return dirs[0] if dirs else None
 
     @staticmethod
     def get_currently_active_wallpaper() -> tuple[str | None, str | None]:
@@ -357,42 +375,73 @@ class ShufflerController:
         self.wallpapers_dir = DiscoveryEngine.find_wallpapers_directory()
 
     def scan_wallpapers(self):
-        """Scan wallpapers directory for valid Lively wallpapers (folders with LivelyInfo.json)."""
+        """Scan wallpapers directory for valid Lively wallpapers (folders with LivelyInfo.json or direct media files)."""
         with self.lock:
             self.wallpapers.clear()
-            if not self.wallpapers_dir or not os.path.isdir(self.wallpapers_dir):
-                logger.warning("Scan skipped: invalid wallpapers directory.")
+            roots = DiscoveryEngine.find_wallpapers_directories()
+            if not roots:
+                logger.warning("Scan skipped: no valid wallpapers directories found.")
                 return
 
+            seen_paths = set()
             try:
-                for entry in os.scandir(self.wallpapers_dir):
-                    if entry.is_dir():
-                        info_file = os.path.join(entry.path, "LivelyInfo.json")
-                        if os.path.isfile(info_file):
-                            title = entry.name
+                for root in roots:
+                    if not os.path.isdir(root):
+                        continue
+                    # Recursively traverse directory tree looking for Lively wallpapers
+                    for dirpath, dirnames, filenames in os.walk(root):
+                        norm_path = os.path.normcase(os.path.abspath(dirpath))
+                        if norm_path in seen_paths:
+                            continue
+
+                        # Case 1: Folder containing LivelyInfo.json project metadata
+                        if "LivelyInfo.json" in filenames:
+                            seen_paths.add(norm_path)
+                            dirnames.clear()  # Do not traverse into internal asset/texture subdirectories
+                            info_file = os.path.join(dirpath, "LivelyInfo.json")
+                            title = os.path.basename(dirpath)
                             author = ""
                             wp_type = ""
                             try:
                                 with open(info_file, "r", encoding="utf-8") as f:
                                     data = json.load(f)
-                                    title = data.get("Title") or entry.name
+                                    title = data.get("Title") or data.get("FileName") or os.path.basename(dirpath)
                                     author = data.get("Author") or ""
-                                    wp_type = data.get("Type") or ""
+                                    wp_type = str(data.get("Type", ""))
                             except Exception as e:
                                 logger.debug("Error reading %s: %s", info_file, e)
 
-                            item = WallpaperItem(entry.path, title, author, wp_type)
+                            item = WallpaperItem(dirpath, title, author, wp_type)
                             self.wallpapers.append(item)
+
+                        # Case 2: Standalone media files (.mp4, .webm, .gif, .mkv) in user-added external custom folders
+                        elif not norm_path.startswith(
+                            os.path.normcase(os.path.abspath(os.path.join(LOCAL_APPDATA, "Lively Wallpaper")))
+                        ):
+                            for f in filenames:
+                                if f.lower().endswith((".mp4", ".webm", ".mkv", ".gif")):
+                                    file_full = os.path.join(dirpath, f)
+                                    file_norm = os.path.normcase(os.path.abspath(file_full))
+                                    if file_norm not in seen_paths:
+                                        seen_paths.add(file_norm)
+                                        name_no_ext = os.path.splitext(f)[0]
+                                        item = WallpaperItem(file_full, name_no_ext, "", "media")
+                                        self.wallpapers.append(item)
 
                 # Sort naturally by title
                 self.wallpapers.sort(key=lambda x: x.title.lower())
-                logger.info("Scanned %d wallpapers from %s", len(self.wallpapers), self.wallpapers_dir)
+                logger.info(
+                    "Scanned %d wallpapers across %d library roots.",
+                    len(self.wallpapers),
+                    len(roots),
+                )
 
                 # Detect currently active wallpaper on startup
                 active_path, active_title = DiscoveryEngine.get_currently_active_wallpaper()
                 if active_path:
+                    norm_active = os.path.normcase(os.path.abspath(active_path))
                     for wp in self.wallpapers:
-                        if os.path.normpath(wp.folder_path) == os.path.normpath(active_path):
+                        if os.path.normcase(os.path.abspath(wp.folder_path)) == norm_active:
                             self.current_wallpaper = wp
                             if not self.history:
                                 self.history.append(wp)

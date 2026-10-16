@@ -20,6 +20,9 @@ def build():
     if not os.path.exists(ICON_FILE):
         print(f"[!] Warning: {ICON_FILE} not found.")
 
+    # Terminate any running instances so the output binary is not locked
+    subprocess.run(["taskkill", "/F", "/IM", f"{APP_NAME}.exe"], capture_output=True)
+
     # Clean previous build artifacts
     for folder in ("build", "dist"):
         if os.path.isdir(folder):
