@@ -1,30 +1,49 @@
 """
-Lively Wallpaper Shuffler - Modern GUI Dashboard
-Provides an interactive desktop interface with wallpaper previews, gallery selection,
-timer intervals, mode settings, and system environment status.
+Lively Wallpaper Shuffler - High-DPI Smooth GUI Dashboard
+Features:
+- High-DPI awareness (pixel-perfect sharpness on Windows 10/11)
+- Virtual windowed scrolling (renders only visible wallpapers for silky 60fps performance)
+- High-contrast, modern dark UI (pill buttons, segmented switches, no messy combobox overlaps)
+- Live wallpaper gallery with thumbnails, search filtering, and click-to-activate
 """
 
 import os
 import sys
+import math
+import ctypes
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog
 from PIL import Image, ImageTk
 
-# Color Palette (Modern Dark Theme)
-BG_DARK = "#13141c"
-BG_CARD = "#1c1e2d"
-BG_CARD_HOVER = "#26293d"
-BG_SIDEBAR = "#181a27"
-BORDER_COLOR = "#2d3148"
-TEXT_PRIMARY = "#f0f2f8"
-TEXT_SECONDARY = "#939ab7"
-TEXT_MUTED = "#686e8a"
-ACCENT_BLUE = "#3b82f6"
-ACCENT_BLUE_HOVER = "#2563eb"
-ACCENT_GREEN = "#10b981"
-ACCENT_AMBER = "#f59e0b"
-ACCENT_PURPLE = "#8b5cf6"
+# Enable High-DPI awareness before Tkinter windows are created
+def enable_dpi_awareness():
+    try:
+        # PROCESS_PER_MONITOR_DPI_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            # Fallback for older Windows 10
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+enable_dpi_awareness()
+
+# Clean High-Contrast Dark Palette
+C_BG = "#10111a"
+C_SIDEBAR = "#161724"
+C_CARD = "#1c1e2e"
+C_CARD_HOVER = "#25283d"
+C_BORDER = "#2b2e46"
+C_BORDER_LIGHT = "#3d4263"
+C_TEXT_WHITE = "#ffffff"
+C_TEXT_PRIMARY = "#f0f2f8"
+C_TEXT_MUTED = "#8f96b3"
+C_ACCENT_BLUE = "#3b82f6"
+C_ACCENT_BLUE_HOVER = "#2563eb"
+C_ACCENT_GREEN = "#10b981"
+C_ACCENT_AMBER = "#f59e0b"
 
 class ShufflerGUI:
     def __init__(self, controller, root: tk.Tk):
@@ -32,28 +51,24 @@ class ShufflerGUI:
         self.root = root
 
         self.root.title("Lively Wallpaper Shuffler")
-        self.root.geometry("980x680")
-        self.root.minsize(860, 560)
-        self.root.configure(bg=BG_DARK)
+        self.root.geometry("1020x720")
+        self.root.minsize(880, 580)
+        self.root.configure(bg=C_BG)
 
-        # Set window icon
         self.set_window_icon()
 
-        # Image cache to prevent garbage collection
-        self.image_cache = {}
+        # Image & thumbnail cache
         self.thumb_cache = {}
+        self.rendered_card_widgets = {}  # index -> (window_id, widget)
         self.filtered_wallpapers = list(self.controller.wallpapers)
 
-        # Configure styles
-        self.setup_styles()
-
-        # Build Layout
+        # Build UI layout
         self.build_ui()
 
-        # Handle window close (minimize to tray)
+        # Window close minimizes to tray
         self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
 
-        # Initial populate
+        # Initial data populate
         self.refresh_ui()
 
     def set_window_icon(self):
@@ -64,138 +79,112 @@ class ShufflerGUI:
             except Exception:
                 pass
 
-    def setup_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-
-        style.configure(".", background=BG_DARK, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.configure("Sidebar.TFrame", background=BG_SIDEBAR)
-        style.configure("Card.TFrame", background=BG_CARD)
-
-        # Combobox
-        style.configure(
-            "TCombobox",
-            fieldbackground=BG_CARD,
-            background=BG_CARD,
-            foreground=TEXT_PRIMARY,
-            bordercolor=BORDER_COLOR,
-            darkcolor=BG_CARD,
-            lightcolor=BG_CARD,
-            arrowcolor=TEXT_PRIMARY,
-            padding=5,
-        )
-
-        # Scrollbar
-        style.configure(
-            "Vertical.TScrollbar",
-            background=BG_CARD,
-            troughcolor=BG_DARK,
-            bordercolor=BG_DARK,
-            arrowcolor=TEXT_MUTED,
-            width=10,
-        )
-
     def build_ui(self):
-        # Main Split: Left Sidebar (Controls & Active WP) + Right Panel (Gallery)
-        self.sidebar = tk.Frame(self.root, bg=BG_SIDEBAR, width=340, padx=18, pady=18)
+        # Left Sidebar (Controls & Active Wallpaper)
+        self.sidebar = tk.Frame(self.root, bg=C_SIDEBAR, width=340, padx=20, pady=20)
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
         self.sidebar.pack_propagate(False)
 
-        self.main_content = tk.Frame(self.root, bg=BG_DARK, padx=20, pady=18)
+        # Right Main Content (Gallery)
+        self.main_content = tk.Frame(self.root, bg=C_BG, padx=22, pady=20)
         self.main_content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.build_sidebar()
-        self.build_gallery_panel()
+        self.build_gallery()
 
     def build_sidebar(self):
-        # App Header
-        header_frame = tk.Frame(self.sidebar, bg=BG_SIDEBAR)
-        header_frame.pack(fill=tk.X, pady=(0, 16))
+        # App Title & Status Badge
+        title_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
+        title_box.pack(fill=tk.X, pady=(0, 16))
 
-        title_lbl = tk.Label(
-            header_frame,
+        tk.Label(
+            title_box,
             text="Lively Shuffler",
             font=("Segoe UI", 16, "bold"),
-            bg=BG_SIDEBAR,
-            fg=TEXT_PRIMARY,
-        )
-        title_lbl.pack(anchor="w")
+            bg=C_SIDEBAR,
+            fg=C_TEXT_WHITE,
+        ).pack(anchor="w")
 
         self.status_badge = tk.Label(
-            header_frame,
+            title_box,
             text="● Active",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_SIDEBAR,
-            fg=ACCENT_GREEN,
+            bg=C_SIDEBAR,
+            fg=C_ACCENT_GREEN,
         )
-        self.status_badge.pack(anchor="w", pady=(2, 0))
+        self.status_badge.pack(anchor="w", pady=(3, 0))
 
-        # --- Active Wallpaper Card ---
-        self.active_card = tk.Frame(self.sidebar, bg=BG_CARD, padx=12, pady=12, highlightbackground=BORDER_COLOR, highlightthickness=1)
+        # --- Active Wallpaper Preview Card ---
+        self.active_card = tk.Frame(
+            self.sidebar,
+            bg=C_CARD,
+            padx=12,
+            pady=12,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+        )
         self.active_card.pack(fill=tk.X, pady=(0, 16))
 
-        active_header = tk.Label(
+        tk.Label(
             self.active_card,
-            text="NOW PLAYING",
+            text="CURRENT ACTIVE WALLPAPER",
             font=("Segoe UI", 8, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_MUTED,
-        )
-        active_header.pack(anchor="w", pady=(0, 6))
+            bg=C_CARD,
+            fg=C_TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 6))
 
-        self.active_thumb_label = tk.Label(self.active_card, bg="#0d0e14", height=110)
-        self.active_thumb_label.pack(fill=tk.X, pady=(0, 8))
+        self.active_thumb_lbl = tk.Label(self.active_card, bg="#0d0e15", height=115)
+        self.active_thumb_lbl.pack(fill=tk.X, pady=(0, 8))
 
-        self.active_title_label = tk.Label(
+        self.active_title_lbl = tk.Label(
             self.active_card,
-            text="Scanning wallpapers...",
+            text="Loading...",
             font=("Segoe UI", 11, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            wraplength=280,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            wraplength=275,
             justify="left",
         )
-        self.active_title_label.pack(anchor="w")
+        self.active_title_lbl.pack(anchor="w")
 
-        self.active_info_label = tk.Label(
+        self.active_info_lbl = tk.Label(
             self.active_card,
             text="",
             font=("Segoe UI", 8),
-            bg=BG_CARD,
-            fg=TEXT_SECONDARY,
-            wraplength=280,
+            bg=C_CARD,
+            fg=C_TEXT_MUTED,
+            wraplength=275,
             justify="left",
         )
-        self.active_info_label.pack(anchor="w", pady=(2, 6))
+        self.active_info_lbl.pack(anchor="w", pady=(2, 8))
 
-        open_folder_btn = tk.Button(
+        tk.Button(
             self.active_card,
             text="📁 Open Folder",
             font=("Segoe UI", 8, "bold"),
-            bg=BG_CARD_HOVER,
-            fg=TEXT_PRIMARY,
-            activebackground=BORDER_COLOR,
-            activeforeground=TEXT_PRIMARY,
+            bg="#2a2e45",
+            fg=C_TEXT_WHITE,
+            activebackground=C_ACCENT_BLUE,
+            activeforeground="#ffffff",
             relief=tk.FLAT,
-            padx=8,
-            pady=3,
+            padx=10,
+            pady=4,
             cursor="hand2",
             command=self.on_open_current_folder,
-        )
-        open_folder_btn.pack(anchor="e")
+        ).pack(anchor="e")
 
-        # --- Playback Quick Actions ---
-        btn_frame = tk.Frame(self.sidebar, bg=BG_SIDEBAR)
-        btn_frame.pack(fill=tk.X, pady=(0, 16))
+        # --- Quick Action Buttons (Prev / Next) ---
+        nav_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
+        nav_box.pack(fill=tk.X, pady=(0, 12))
 
         self.prev_btn = tk.Button(
-            btn_frame,
+            nav_box,
             text="⏮ Previous",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_CARD_HOVER,
-            activeforeground=TEXT_PRIMARY,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
             padx=10,
             pady=7,
@@ -205,12 +194,12 @@ class ShufflerGUI:
         self.prev_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
 
         self.next_btn = tk.Button(
-            btn_frame,
+            nav_box,
             text="⏭ Next",
             font=("Segoe UI", 9, "bold"),
-            bg=ACCENT_BLUE,
+            bg=C_ACCENT_BLUE,
             fg="#ffffff",
-            activebackground=ACCENT_BLUE_HOVER,
+            activebackground=C_ACCENT_BLUE_HOVER,
             activeforeground="#ffffff",
             relief=tk.FLAT,
             padx=10,
@@ -225,165 +214,205 @@ class ShufflerGUI:
             self.sidebar,
             text="⏸ Pause Shuffle",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_CARD_HOVER,
-            activeforeground=TEXT_PRIMARY,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
-            pady=6,
+            pady=7,
             cursor="hand2",
             command=self.on_toggle_pause_clicked,
         )
-        self.pause_btn.pack(fill=tk.X, pady=(0, 16))
+        self.pause_btn.pack(fill=tk.X, pady=(0, 18))
 
-        # --- Settings Section ---
-        settings_label = tk.Label(
+        # --- Mode Segmented Pill Switch (High Contrast) ---
+        tk.Label(
             self.sidebar,
-            text="SETTINGS",
+            text="SHUFFLE MODE",
             font=("Segoe UI", 8, "bold"),
-            bg=BG_SIDEBAR,
-            fg=TEXT_MUTED,
+            bg=C_SIDEBAR,
+            fg=C_TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 6))
+
+        mode_switch_frame = tk.Frame(self.sidebar, bg=C_CARD, padx=3, pady=3, highlightbackground=C_BORDER, highlightthickness=1)
+        mode_switch_frame.pack(fill=tk.X, pady=(0, 16))
+
+        self.mode_shuffle_btn = tk.Button(
+            mode_switch_frame,
+            text="🔀 Random",
+            font=("Segoe UI", 9, "bold"),
+            relief=tk.FLAT,
+            padx=8,
+            pady=5,
+            cursor="hand2",
+            command=lambda: self.set_mode_ui("shuffle"),
         )
-        settings_label.pack(anchor="w", pady=(0, 6))
+        self.mode_shuffle_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
 
-        # Interval selector
-        interval_row = tk.Frame(self.sidebar, bg=BG_SIDEBAR)
-        interval_row.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(interval_row, text="Interval:", font=("Segoe UI", 9), bg=BG_SIDEBAR, fg=TEXT_SECONDARY).pack(side=tk.LEFT)
-
-        self.interval_var = tk.StringVar()
-        interval_labels = [label for label, _ in self.controller.get_interval_presets()]
-        self.interval_combo = ttk.Combobox(
-            interval_row,
-            textvariable=self.interval_var,
-            values=interval_labels,
-            state="readonly",
-            width=14,
+        self.mode_seq_btn = tk.Button(
+            mode_switch_frame,
+            text="🔁 Sequential",
+            font=("Segoe UI", 9, "bold"),
+            relief=tk.FLAT,
+            padx=8,
+            pady=5,
+            cursor="hand2",
+            command=lambda: self.set_mode_ui("sequential"),
         )
-        self.interval_combo.pack(side=tk.RIGHT)
-        self.interval_combo.bind("<<ComboboxSelected>>", self.on_interval_selected)
+        self.mode_seq_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
-        # Mode selector (Shuffle vs Sequential)
-        mode_row = tk.Frame(self.sidebar, bg=BG_SIDEBAR)
-        mode_row.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(mode_row, text="Mode:", font=("Segoe UI", 9), bg=BG_SIDEBAR, fg=TEXT_SECONDARY).pack(side=tk.LEFT)
+        # --- Interval Selector Grid (High Contrast Pills) ---
+        tk.Label(
+            self.sidebar,
+            text="TIMER INTERVAL",
+            font=("Segoe UI", 8, "bold"),
+            bg=C_SIDEBAR,
+            fg=C_TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 6))
 
-        self.mode_var = tk.StringVar(value=self.controller.mode)
-        mode_combo = ttk.Combobox(
-            mode_row,
-            textvariable=self.mode_var,
-            values=["shuffle", "sequential"],
-            state="readonly",
-            width=14,
-        )
-        mode_combo.pack(side=tk.RIGHT)
-        mode_combo.bind("<<ComboboxSelected>>", self.on_mode_selected)
+        interval_grid = tk.Frame(self.sidebar, bg=C_SIDEBAR)
+        interval_grid.pack(fill=tk.X, pady=(0, 16))
 
-        # Start with Windows checkbox
+        self.interval_buttons = {}
+        presets = [
+            ("30s", 30),
+            ("1m", 60),
+            ("5m", 300),
+            ("10m", 600),
+            ("15m", 900),
+            ("30m", 1800),
+            ("1h", 3600),
+            ("2h", 7200),
+        ]
+
+        for i, (label, sec) in enumerate(presets):
+            row = i // 4
+            col = i % 4
+            btn = tk.Button(
+                interval_grid,
+                text=label,
+                font=("Segoe UI", 8, "bold"),
+                relief=tk.FLAT,
+                cursor="hand2",
+                pady=4,
+                command=lambda s=sec: self.set_interval_ui(s),
+            )
+            btn.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
+            interval_grid.columnconfigure(col, weight=1)
+            self.interval_buttons[sec] = btn
+
+        # --- Options (Autostart) ---
         self.autostart_var = tk.BooleanVar(value=self.controller.start_with_windows)
         self.autostart_check = tk.Checkbutton(
             self.sidebar,
             text="Start with Windows",
             variable=self.autostart_var,
             font=("Segoe UI", 9),
-            bg=BG_SIDEBAR,
-            fg=TEXT_PRIMARY,
-            selectcolor=BG_CARD,
-            activebackground=BG_SIDEBAR,
-            activeforeground=TEXT_PRIMARY,
+            bg=C_SIDEBAR,
+            fg=C_TEXT_PRIMARY,
+            selectcolor=C_CARD,
+            activebackground=C_SIDEBAR,
+            activeforeground=C_TEXT_WHITE,
+            cursor="hand2",
             command=self.on_autostart_toggled,
         )
-        self.autostart_check.pack(anchor="w", pady=(0, 14))
+        self.autostart_check.pack(anchor="w", pady=(4, 14))
 
-        # Environment status indicators
-        env_frame = tk.Frame(self.sidebar, bg=BG_SIDEBAR)
-        env_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        # --- Status at Bottom of Sidebar ---
+        status_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
+        status_box.pack(side=tk.BOTTOM, fill=tk.X)
 
         exe_found = bool(self.controller.lively_exe)
-        exe_color = ACCENT_GREEN if exe_found else "#ef4444"
-        exe_text = "● Lively.exe detected" if exe_found else "● Lively.exe not found"
-        self.exe_status_lbl = tk.Label(env_frame, text=exe_text, font=("Segoe UI", 8), bg=BG_SIDEBAR, fg=exe_color)
-        self.exe_status_lbl.pack(anchor="w")
+        exe_color = C_ACCENT_GREEN if exe_found else "#ef4444"
+        exe_msg = "● Lively.exe detected" if exe_found else "● Lively.exe not found"
+        self.exe_lbl = tk.Label(status_box, text=exe_msg, font=("Segoe UI", 8), bg=C_SIDEBAR, fg=exe_color)
+        self.exe_lbl.pack(anchor="w")
 
-        lib_count = len(self.controller.wallpapers)
-        self.lib_status_lbl = tk.Label(
-            env_frame,
-            text=f"● Library: {lib_count} wallpapers loaded",
+        count = len(self.controller.wallpapers)
+        self.lib_lbl = tk.Label(
+            status_box,
+            text=f"● Library: {count} wallpapers",
             font=("Segoe UI", 8),
-            bg=BG_SIDEBAR,
-            fg=ACCENT_GREEN if lib_count > 0 else ACCENT_AMBER,
+            bg=C_SIDEBAR,
+            fg=C_ACCENT_GREEN if count > 0 else C_ACCENT_AMBER,
         )
-        self.lib_status_lbl.pack(anchor="w")
+        self.lib_lbl.pack(anchor="w")
 
-    def build_gallery_panel(self):
-        # Gallery Top Controls Bar
-        top_bar = tk.Frame(self.main_content, bg=BG_DARK)
-        top_bar.pack(fill=tk.X, pady=(0, 14))
+    def build_gallery(self):
+        # Top Gallery Bar
+        top_bar = tk.Frame(self.main_content, bg=C_BG)
+        top_bar.pack(fill=tk.X, pady=(0, 12))
 
-        title_frame = tk.Frame(top_bar, bg=BG_DARK)
-        title_frame.pack(side=tk.LEFT)
+        title_box = tk.Frame(top_bar, bg=C_BG)
+        title_box.pack(side=tk.LEFT)
 
-        self.gallery_title = tk.Label(
-            title_frame,
+        tk.Label(
+            title_box,
             text="Wallpaper Library",
             font=("Segoe UI", 15, "bold"),
-            bg=BG_DARK,
-            fg=TEXT_PRIMARY,
-        )
-        self.gallery_title.pack(side=tk.LEFT)
+            bg=C_BG,
+            fg=C_TEXT_WHITE,
+        ).pack(side=tk.LEFT)
 
         self.count_badge = tk.Label(
-            title_frame,
+            title_box,
             text="0",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=ACCENT_BLUE,
+            bg=C_CARD,
+            fg=C_ACCENT_BLUE,
             padx=8,
             pady=2,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
         )
         self.count_badge.pack(side=tk.LEFT, padx=(10, 0))
 
-        # Top Buttons (Refresh + Add Folder)
-        btn_box = tk.Frame(top_bar, bg=BG_DARK)
+        # Action Buttons (Add Folder + Rescan)
+        btn_box = tk.Frame(top_bar, bg=C_BG)
         btn_box.pack(side=tk.RIGHT)
 
-        add_folder_btn = tk.Button(
+        tk.Button(
             btn_box,
             text="+ Add Folder",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_CARD_HOVER,
-            activeforeground=TEXT_PRIMARY,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
             padx=10,
             pady=5,
             cursor="hand2",
             command=self.on_add_custom_folder,
-        )
-        add_folder_btn.pack(side=tk.LEFT, padx=(0, 6))
+        ).pack(side=tk.LEFT, padx=(0, 6))
 
-        rescan_btn = tk.Button(
+        tk.Button(
             btn_box,
             text="🔄 Rescan",
             font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            activebackground=BG_CARD_HOVER,
-            activeforeground=TEXT_PRIMARY,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
             padx=10,
             pady=5,
             cursor="hand2",
             command=self.on_rescan_clicked,
-        )
-        rescan_btn.pack(side=tk.LEFT)
+        ).pack(side=tk.LEFT)
 
         # Search Bar
-        search_frame = tk.Frame(self.main_content, bg=BG_CARD, padx=10, pady=6, highlightbackground=BORDER_COLOR, highlightthickness=1)
+        search_frame = tk.Frame(
+            self.main_content,
+            bg=C_CARD,
+            padx=10,
+            pady=7,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+        )
         search_frame.pack(fill=tk.X, pady=(0, 14))
 
-        tk.Label(search_frame, text="🔍", bg=BG_CARD, fg=TEXT_MUTED, font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(search_frame, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED, font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 6))
 
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self.filter_wallpapers())
@@ -391,48 +420,132 @@ class ShufflerGUI:
             search_frame,
             textvariable=self.search_var,
             font=("Segoe UI", 10),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY,
-            insertbackground=TEXT_PRIMARY,
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            insertbackground=C_TEXT_WHITE,
             relief=tk.FLAT,
         )
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Scrollable Gallery Area
-        self.canvas = tk.Canvas(self.main_content, bg=BG_DARK, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.main_content, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = tk.Frame(self.canvas, bg=BG_DARK)
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
-
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        # Scrollable Virtual Canvas
+        self.canvas = tk.Canvas(self.main_content, bg=C_BG, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.main_content, orient="vertical", command=self.on_scrollbar_scroll)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.canvas.bind(
-            "<Configure>",
-            lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width),
-        )
 
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Mouse wheel scrolling
+        # Bindings for Smooth Virtual Scrolling
+        self.canvas.bind("<Configure>", lambda e: self.on_canvas_configure())
         self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+
+    # =========================================================================
+    # Virtual Windowed Gallery Rendering (Renders only visible items)
+    # =========================================================================
+    CARD_H = 145
+    ROW_GAP = 12
+    COL_GAP = 12
+
+    def on_scrollbar_scroll(self, *args):
+        self.canvas.yview(*args)
+        self.update_visible_cards()
 
     def on_mousewheel(self, event):
         if self.canvas.winfo_exists():
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # Smooth scrolling step
+            step = int(-1 * (event.delta / 120) * 2)
+            self.canvas.yview_scroll(step, "units")
+            self.update_visible_cards()
 
-    def load_thumbnail(self, wallpaper_item, size=(160, 95)):
+    def on_canvas_configure(self):
+        self.update_virtual_scrollregion()
+        self.update_visible_cards()
+
+    def get_cols(self):
+        width = self.canvas.winfo_width()
+        if width <= 50:
+            width = 620
+        if width > 800:
+            return 4
+        elif width > 520:
+            return 3
+        else:
+            return 2
+
+    def update_virtual_scrollregion(self):
+        total = len(self.filtered_wallpapers)
+        cols = self.get_cols()
+        total_rows = math.ceil(total / cols) if cols > 0 else 0
+        total_height = total_rows * (self.CARD_H + self.ROW_GAP) + 20
+        cw = max(self.canvas.winfo_width(), 620)
+        ch = max(self.canvas.winfo_height(), 400)
+        self.canvas.config(scrollregion=(0, 0, cw, max(total_height, ch)))
+
+    def update_visible_cards(self):
+        """Virtual render: dynamically creates widgets only for cards in the current viewport."""
+        total = len(self.filtered_wallpapers)
+        if total == 0:
+            # Clear all
+            for win_id, widget in list(self.rendered_card_widgets.values()):
+                self.canvas.delete(win_id)
+                widget.destroy()
+            self.rendered_card_widgets.clear()
+            return
+
+        cols = self.get_cols()
+        row_height = self.CARD_H + self.ROW_GAP
+        total_rows = math.ceil(total / cols)
+        total_height = max(total_rows * row_height + 20, 1)
+
+        # Calculate visible pixel bounds
+        y_top_ratio, y_bottom_ratio = self.canvas.yview()
+        top_px = y_top_ratio * total_height
+        bottom_px = y_bottom_ratio * total_height
+
+        # Determine visible row range with 1 buffer row above and below
+        first_row = max(0, int(top_px // row_height) - 1)
+        last_row = min(total_rows - 1, int(bottom_px // row_height) + 1)
+
+        visible_start = first_row * cols
+        visible_end = min(total, (last_row + 1) * cols)
+        needed_indices = set(range(visible_start, visible_end))
+
+        # 1. Remove cards that scrolled out of view
+        current_indices = set(self.rendered_card_widgets.keys())
+        for idx in current_indices - needed_indices:
+            win_id, widget = self.rendered_card_widgets.pop(idx)
+            self.canvas.delete(win_id)
+            widget.destroy()
+
+        # 2. Add or reposition cards that entered view
+        canvas_width = self.canvas.winfo_width()
+        if canvas_width <= 50:
+            canvas_width = 620
+        col_width = max(140, (canvas_width - (cols - 1) * self.COL_GAP - 10) // cols)
+
+        for idx in needed_indices:
+            wp = self.filtered_wallpapers[idx]
+            r = idx // cols
+            c = idx % cols
+            x = c * (col_width + self.COL_GAP) + 5
+            y = r * row_height + 10
+
+            if idx not in self.rendered_card_widgets:
+                card = self.create_card_widget(wp, col_width)
+                win_id = self.canvas.create_window(x, y, window=card, anchor="nw", width=col_width, height=self.CARD_H)
+                self.rendered_card_widgets[idx] = (win_id, card)
+            else:
+                win_id, card = self.rendered_card_widgets[idx]
+                self.canvas.coords(win_id, x, y)
+                self.canvas.itemconfigure(win_id, width=col_width)
+
+    def load_thumbnail(self, wallpaper_item, size=(160, 90)):
         """Load and cache wallpaper thumbnail image."""
+        size = (max(60, int(size[0])), max(40, int(size[1])))
         if wallpaper_item.folder_path in self.thumb_cache:
             return self.thumb_cache[wallpaper_item.folder_path]
 
         thumb_img = None
-        # Try finding thumbnail in folder
         if os.path.isdir(wallpaper_item.folder_path):
             info_path = os.path.join(wallpaper_item.folder_path, "LivelyInfo.json")
             if os.path.isfile(info_path):
@@ -449,8 +562,8 @@ class ShufflerGUI:
                     pass
 
             if not thumb_img:
-                for candidate in ("thumbnail.jpg", "thumbnail.png", "preview.gif"):
-                    p = os.path.join(wallpaper_item.folder_path, candidate)
+                for cand in ("thumbnail.jpg", "thumbnail.png", "preview.gif"):
+                    p = os.path.join(wallpaper_item.folder_path, cand)
                     if os.path.isfile(p):
                         try:
                             thumb_img = Image.open(p)
@@ -459,14 +572,12 @@ class ShufflerGUI:
                             pass
 
         if not thumb_img:
-            # Fallback placeholder image
-            thumb_img = Image.new("RGB", size, color="#1e2030")
+            thumb_img = Image.new("RGB", size, color="#1c1f30")
 
         thumb_img = thumb_img.convert("RGBA")
         thumb_img.thumbnail(size, Image.Resampling.LANCZOS)
 
-        # Create canvas of exact size and paste centered
-        canvas_img = Image.new("RGBA", size, (20, 22, 34, 255))
+        canvas_img = Image.new("RGBA", size, (16, 17, 26, 255))
         offset_x = (size[0] - thumb_img.width) // 2
         offset_y = (size[1] - thumb_img.height) // 2
         canvas_img.paste(thumb_img, (offset_x, offset_y), thumb_img)
@@ -475,50 +586,124 @@ class ShufflerGUI:
         self.thumb_cache[wallpaper_item.folder_path] = tk_img
         return tk_img
 
+    def create_card_widget(self, wallpaper, width):
+        is_active = (self.controller.current_wallpaper == wallpaper)
+        border_color = C_ACCENT_BLUE if is_active else C_BORDER
+        border_width = 2 if is_active else 1
+
+        card = tk.Frame(
+            self.canvas,
+            bg=C_CARD,
+            padx=8,
+            pady=8,
+            highlightbackground=border_color,
+            highlightthickness=border_width,
+            cursor="hand2",
+        )
+
+        # Thumbnail
+        thumb = self.load_thumbnail(wallpaper, size=(width - 16, 85))
+        thumb_lbl = tk.Label(card, image=thumb, bg="#0d0e15")
+        thumb_lbl.image = thumb
+        thumb_lbl.pack(fill=tk.X, pady=(0, 6))
+
+        # Title
+        display_title = wallpaper.title
+        max_chars = max(18, width // 10)
+        if len(display_title) > max_chars:
+            display_title = display_title[: max_chars - 3] + "..."
+
+        title_lbl = tk.Label(
+            card,
+            text=display_title,
+            font=("Segoe UI", 9, "bold"),
+            bg=C_CARD,
+            fg=C_ACCENT_BLUE if is_active else C_TEXT_WHITE,
+            anchor="w",
+        )
+        title_lbl.pack(fill=tk.X)
+
+        # Badge
+        badge_text = "● ACTIVE NOW" if is_active else (wallpaper.wp_type.capitalize() if wallpaper.wp_type else "Wallpaper")
+        badge_color = C_ACCENT_BLUE if is_active else C_TEXT_MUTED
+        badge_lbl = tk.Label(
+            card,
+            text=badge_text,
+            font=("Segoe UI", 7, "bold"),
+            bg=C_CARD,
+            fg=badge_color,
+            anchor="w",
+        )
+        badge_lbl.pack(fill=tk.X, pady=(1, 0))
+
+        # Click handler
+        def on_click(e):
+            self.controller.select_wallpaper(wallpaper)
+            self.refresh_ui()
+
+        card.bind("<Button-1>", on_click)
+        thumb_lbl.bind("<Button-1>", on_click)
+        title_lbl.bind("<Button-1>", on_click)
+        badge_lbl.bind("<Button-1>", on_click)
+
+        return card
+
+    # =========================================================================
+    # UI State Synchronization
+    # =========================================================================
     def refresh_ui(self):
-        """Update all elements on the dashboard."""
-        # 1. Update current wallpaper info
+        """Update active wallpaper showcase, status badges, and gallery."""
         curr = self.controller.current_wallpaper
         if curr:
-            self.active_title_label.config(text=curr.title)
-            info_str = f"Type: {curr.wp_type.capitalize() if curr.wp_type else 'Wallpaper'}"
+            self.active_title_lbl.config(text=curr.title)
+            info = f"Type: {curr.wp_type.capitalize() if curr.wp_type else 'Wallpaper'}"
             if curr.author:
-                info_str += f" • Author: {curr.author}"
-            self.active_info_label.config(text=info_str)
+                info += f" • By {curr.author}"
+            self.active_info_lbl.config(text=info)
 
-            # Load active thumbnail
-            active_img = self.load_thumbnail(curr, size=(280, 120))
-            self.active_thumb_label.config(image=active_img)
-            self.active_thumb_label.image = active_img
+            active_thumb = self.load_thumbnail(curr, size=(280, 115))
+            self.active_thumb_lbl.config(image=active_thumb)
+            self.active_thumb_lbl.image = active_thumb
         else:
-            self.active_title_label.config(text="No wallpaper active")
-            self.active_info_label.config(text="")
+            self.active_title_lbl.config(text="No wallpaper active")
+            self.active_info_lbl.config(text="")
 
-        # 2. Update status badge & pause button
+        # Status badge & pause button
         if self.controller.is_paused:
-            self.status_badge.config(text="● Paused", fg=ACCENT_AMBER)
-            self.pause_btn.config(text="▶ Resume Shuffle", bg=ACCENT_GREEN, fg="#ffffff")
+            self.status_badge.config(text="● Paused", fg=C_ACCENT_AMBER)
+            self.pause_btn.config(text="▶ Resume Shuffle", bg=C_ACCENT_GREEN, fg="#ffffff")
         else:
             label = self.controller.format_interval(self.controller.interval_seconds)
             self.status_badge.config(
                 text=f"● Active ({self.controller.mode.capitalize()} • {label})",
-                fg=ACCENT_GREEN,
+                fg=C_ACCENT_GREEN,
             )
-            self.pause_btn.config(text="⏸ Pause Shuffle", bg=BG_CARD, fg=TEXT_PRIMARY)
+            self.pause_btn.config(text="⏸ Pause Shuffle", bg=C_CARD, fg=C_TEXT_WHITE)
 
-        # 3. Update interval combo selection
-        curr_label = self.controller.format_interval(self.controller.interval_seconds)
-        self.interval_var.set(curr_label)
+        # Mode buttons highlight
+        if self.controller.mode == "shuffle":
+            self.mode_shuffle_btn.config(bg=C_ACCENT_BLUE, fg="#ffffff")
+            self.mode_seq_btn.config(bg=C_CARD, fg=C_TEXT_MUTED)
+        else:
+            self.mode_shuffle_btn.config(bg=C_CARD, fg=C_TEXT_MUTED)
+            self.mode_seq_btn.config(bg=C_ACCENT_BLUE, fg="#ffffff")
 
-        # 4. Update count badge & library status
+        # Interval buttons highlight
+        for sec, btn in self.interval_buttons.items():
+            if sec == self.controller.interval_seconds:
+                btn.config(bg=C_ACCENT_BLUE, fg="#ffffff")
+            else:
+                btn.config(bg=C_CARD, fg=C_TEXT_PRIMARY)
+
+        # Counts
         count = len(self.controller.wallpapers)
         self.count_badge.config(text=str(count))
-        self.lib_status_lbl.config(
-            text=f"● Library: {count} wallpapers loaded",
-            fg=ACCENT_GREEN if count > 0 else ACCENT_AMBER,
+        self.lib_lbl.config(
+            text=f"● Library: {count} wallpapers",
+            fg=C_ACCENT_GREEN if count > 0 else C_ACCENT_AMBER,
         )
 
-        # 5. Render wallpapers gallery
+        # Refresh gallery
         self.filter_wallpapers()
 
     def filter_wallpapers(self):
@@ -530,108 +715,26 @@ class ShufflerGUI:
                 wp for wp in self.controller.wallpapers
                 if query in wp.title.lower() or query in wp.author.lower()
             ]
-        self.render_gallery()
-
-    def render_gallery(self):
-        # Clear existing items
-        for widget in self.scrollable_frame.winfo_children():
+        # Clear currently rendered widgets before repopulating
+        for win_id, widget in list(self.rendered_card_widgets.values()):
+            self.canvas.delete(win_id)
             widget.destroy()
+        self.rendered_card_widgets.clear()
 
-        if not self.filtered_wallpapers:
-            no_lbl = tk.Label(
-                self.scrollable_frame,
-                text="No wallpapers found matching your search.",
-                font=("Segoe UI", 11),
-                bg=BG_DARK,
-                fg=TEXT_MUTED,
-                pady=40,
-            )
-            no_lbl.pack()
-            return
+        self.update_virtual_scrollregion()
+        self.update_visible_cards()
 
-        # Render rows of cards (3 columns or 2 columns based on width)
-        cols = 3
-        for idx, wp in enumerate(self.filtered_wallpapers):
-            row = idx // cols
-            col = idx % cols
+    # =========================================================================
+    # Action Handlers
+    # =========================================================================
+    def set_mode_ui(self, mode: str):
+        self.controller.set_mode(mode)
+        self.refresh_ui()
 
-            card = self.create_wallpaper_card(self.scrollable_frame, wp)
-            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+    def set_interval_ui(self, seconds: int):
+        self.controller.set_interval(seconds)
+        self.refresh_ui()
 
-        # Equal column weights
-        for c in range(cols):
-            self.scrollable_frame.columnconfigure(c, weight=1)
-
-    def create_wallpaper_card(self, parent, wallpaper):
-        is_active = (self.controller.current_wallpaper == wallpaper)
-        border_c = ACCENT_BLUE if is_active else BORDER_COLOR
-
-        card = tk.Frame(
-            parent,
-            bg=BG_CARD,
-            padx=8,
-            pady=8,
-            highlightbackground=border_c,
-            highlightthickness=2 if is_active else 1,
-            cursor="hand2",
-        )
-
-        # Thumbnail
-        thumb = self.load_thumbnail(wallpaper, size=(180, 100))
-        thumb_lbl = tk.Label(card, image=thumb, bg="#0d0e14")
-        thumb_lbl.image = thumb
-        thumb_lbl.pack(fill=tk.X, pady=(0, 6))
-
-        # Title
-        display_title = wallpaper.title
-        if len(display_title) > 28:
-            display_title = display_title[:25] + "..."
-        title_lbl = tk.Label(
-            card,
-            text=display_title,
-            font=("Segoe UI", 9, "bold"),
-            bg=BG_CARD,
-            fg=TEXT_PRIMARY if not is_active else ACCENT_BLUE,
-            anchor="w",
-        )
-        title_lbl.pack(fill=tk.X)
-
-        # Subtitle / active badge
-        if is_active:
-            sub_lbl = tk.Label(
-                card,
-                text="ACTIVE NOW",
-                font=("Segoe UI", 7, "bold"),
-                bg=BG_CARD,
-                fg=ACCENT_BLUE,
-                anchor="w",
-            )
-            sub_lbl.pack(fill=tk.X, pady=(2, 0))
-        else:
-            sub_text = wallpaper.wp_type.capitalize() if wallpaper.wp_type else "Wallpaper"
-            sub_lbl = tk.Label(
-                card,
-                text=sub_text,
-                font=("Segoe UI", 7),
-                bg=BG_CARD,
-                fg=TEXT_MUTED,
-                anchor="w",
-            )
-            sub_lbl.pack(fill=tk.X, pady=(2, 0))
-
-        # Click handler to switch wallpaper
-        def on_click(e):
-            self.controller.select_wallpaper(wallpaper)
-            self.refresh_ui()
-
-        card.bind("<Button-1>", on_click)
-        thumb_lbl.bind("<Button-1>", on_click)
-        title_lbl.bind("<Button-1>", on_click)
-        sub_lbl.bind("<Button-1>", on_click)
-
-        return card
-
-    # --- Action Handlers ---
     def on_next_clicked(self):
         self.controller.next_wallpaper(explicit_user_trigger=True)
         self.refresh_ui()
@@ -642,18 +745,6 @@ class ShufflerGUI:
 
     def on_toggle_pause_clicked(self):
         self.controller.toggle_pause()
-        self.refresh_ui()
-
-    def on_interval_selected(self, event):
-        selected_label = self.interval_var.get()
-        for label, sec in self.controller.get_interval_presets():
-            if label == selected_label:
-                self.controller.set_interval(sec)
-                self.refresh_ui()
-                break
-
-    def on_mode_selected(self, event):
-        self.controller.set_mode(self.mode_var.get())
         self.refresh_ui()
 
     def on_autostart_toggled(self):
@@ -683,7 +774,7 @@ class ShufflerGUI:
         self.refresh_ui()
 
     def on_close_window(self):
-        # Minimize/hide to system tray instead of destroying
+        # Minimize / hide to system tray
         self.root.withdraw()
 
     def show_window(self):

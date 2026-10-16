@@ -19,6 +19,15 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 import pystray
 
+# Enable High-DPI awareness on Windows (eliminates font/UI blurriness)
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 APP_NAME = "Lively Wallpaper Shuffler"
 APP_VERSION = "1.0.0"
 MUTEX_NAME = "Global\\LivelyWallpaperShuffler_SingleInstance_Mutex"
