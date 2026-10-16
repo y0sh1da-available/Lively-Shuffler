@@ -206,9 +206,9 @@ The compiled single-file binary will be generated at `dist/LivelyWallpaperShuffl
 If you find **Lively Wallpaper Shuffler** helpful and would like to support its ongoing development, donations are gratefully appreciated!
 
 ### 🌍 International (PayPal)
-[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal&style=for-the-badge)](https://paypal.me/YOUR_PAYPAL_USERNAME)
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal&style=for-the-badge)](https://paypal.me/y0sh1da)
 
-> **Link:** [paypal.me/YOUR_PAYPAL_USERNAME](https://paypal.me/YOUR_PAYPAL_USERNAME)
+> **Link:** [paypal.me/y0sh1da](https://paypal.me/y0sh1da)
 
 ---
 
@@ -217,8 +217,8 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 | Bank Details | Information |
 | :--- | :--- |
 | **Ngân hàng (Bank)** | Bank for Investment and Development of Vietnam (BIDV) |
-| **Số tài khoản (Account No.)** | `YOUR_BIDV_ACCOUNT_NUMBER` |
-| **Chủ tài khoản (Account Name)** | `YOUR_FULL_NAME` |
+| **Số tài khoản (Account No.)** | `4605007300` |
+| **Chủ tài khoản (Account Name)** | `DANG HUU CUONG` |
 | **Nội dung (Transfer Memo)** | `Lively Shuffler Support` |
 
 <details>
@@ -227,7 +227,7 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 <br>
 
 <p align="center">
-  <img src="https://img.vietqr.io/image/bidv-YOUR_BIDV_ACCOUNT_NUMBER-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=YOUR_FULL_NAME" alt="BIDV VietQR Code" width="300">
+  <img src="https://img.vietqr.io/image/bidv-4605007300-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=DANG%20HUU%20CUONG" alt="BIDV VietQR Code" width="300">
 </p>
 
 </details>
