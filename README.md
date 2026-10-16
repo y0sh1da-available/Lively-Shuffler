@@ -23,6 +23,7 @@
 ---
 
 ## 📖 Table of Contents
+- [About The Project](#-about-the-project)
 - [System Requirements](#-system-requirements)
 - [Why This Utility?](#-why-this-utility)
 - [Setup Tutorial](#-setup-tutorial)
@@ -34,6 +35,21 @@
 - [Developer Guide (Building from Source)](#-developer-guide-building-from-source)
 - [License & Ownership](#-license--ownership)
 - [Built with AI](#-built-with-ai)
+
+---
+
+## 🌟 About The Project
+
+**Lively Wallpaper Shuffler** is a lightweight, zero-configuration desktop companion utility engineered specifically for [Lively Wallpaper](https://github.com/rocksdanister/lively) (v2.x+).
+
+While Lively Wallpaper provides a great engine for interactive, animated, and video desktop backgrounds, it currently lacks an out-of-the-box automatic playlist shuffler. Existing community solutions relied on deprecated local network sockets and static path configurations that break on modern Windows installations.
+
+This project delivers:
+- **Zero Configuration:** Automatically locates Lively's running process, default library directories, and custom user-imported wallpapers.
+- **Modern Visual GUI:** Browse all your live wallpapers in an interactive card gallery with high-resolution thumbnails, live search, and one-click activation.
+- **Silent Background Shuffling:** Shuffles your desktop wallpaper at customizable intervals (`30s` to `4h`) completely invisibly without annoying console popup windows.
+- **System Tray Controls:** Quick actions right by your Windows taskbar clock with single-instance mutex protection.
+- **Portable Single-File Binary:** Self-contained executable with zero dependencies or runtime installers needed.
 
 ---
 
