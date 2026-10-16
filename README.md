@@ -239,7 +239,7 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 <br>
 
 <p align="center">
-  <img src="https://img.vietqr.io/image/bidv-4605007300-compact2.png?amount=0&accountName=DANG%20HUU%20CUONG" alt="BIDV VietQR Code" width="300">
+  <img src="https://img.vietqr.io/image/bidv-4605007300-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=DANG%20HUU%20CUONG" alt="BIDV VietQR Code" width="300">
 </p>
 
 </details>
