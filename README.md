@@ -212,12 +212,12 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 
 ---
 
-### 🇻🇳 Vietnam (Vietcombank Transfer & VietQR)
+### 🇻🇳 Vietnam (BIDV Transfer & VietQR)
 
 | Bank Details | Information |
 | :--- | :--- |
-| **Ngân hàng (Bank)** | Joint Stock Commercial Bank for Foreign Trade of Vietnam (Vietcombank - VCB) |
-| **Số tài khoản (Account No.)** | `YOUR_VCB_ACCOUNT_NUMBER` |
+| **Ngân hàng (Bank)** | Bank for Investment and Development of Vietnam (BIDV) |
+| **Số tài khoản (Account No.)** | `YOUR_BIDV_ACCOUNT_NUMBER` |
 | **Chủ tài khoản (Account Name)** | `YOUR_FULL_NAME` |
 | **Nội dung (Transfer Memo)** | `Lively Shuffler Support` |
 
@@ -227,7 +227,7 @@ If you find **Lively Wallpaper Shuffler** helpful and would like to support its 
 <br>
 
 <p align="center">
-  <img src="https://img.vietqr.io/image/vietcombank-YOUR_VCB_ACCOUNT_NUMBER-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=YOUR_FULL_NAME" alt="Vietcombank VietQR Code" width="300">
+  <img src="https://img.vietqr.io/image/bidv-YOUR_BIDV_ACCOUNT_NUMBER-compact2.png?amount=0&addInfo=Lively%20Shuffler%20Support&accountName=YOUR_FULL_NAME" alt="BIDV VietQR Code" width="300">
 </p>
 
 </details>
