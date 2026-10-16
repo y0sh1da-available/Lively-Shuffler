@@ -14,6 +14,7 @@
   <a href="https://github.com/y0sh1da-available/Lively-Shuffler/releases"><img src="https://img.shields.io/github/v/release/y0sh1da-available/Lively-Shuffler?color=success&include_prereleases&label=Release" alt="GitHub Release"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?logo=windows&logoColor=white" alt="Windows Support">
   <img src="https://img.shields.io/badge/Lively%20Wallpaper-v2.0%2B-blueviolet" alt="Lively Compatibility">
+  <img src="https://img.shields.io/badge/Made%20with-AI%20Assistance-8A2BE2.svg" alt="Made with AI Assistance">
   <img src="https://img.shields.io/badge/Configuration-Zero%20Config-brightgreen" alt="Zero Config">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
 </p>
@@ -200,6 +201,12 @@ Licensed under the **[MIT License](LICENSE)**.
 - You are free to download, run, fork, study, and contribute to this repository.
 - **You may NOT claim ownership of this software or remove the original copyright and author attribution.**
 - Any redistribution or derivative work must include the original copyright notice and attribution to **y0sh1da-available**.
+
+---
+
+## 🤖 Built with AI
+
+This project was designed, implemented, and refined with **AI assistance** (Google DeepMind Antigravity pair programming), conceived and maintained by **y0sh1da-available**.
 
 ---
 *Lively Wallpaper is an open-source project by [rocksdanister](https://github.com/rocksdanister/lively).*
