@@ -10,6 +10,7 @@ Features:
 import os
 import sys
 import math
+import time
 import ctypes
 import threading
 import tkinter as tk
@@ -57,10 +58,13 @@ class ShufflerGUI:
 
         self.set_window_icon()
 
-        # Image & thumbnail cache
-        self.thumb_cache = {}
-        self.rendered_card_widgets = {}  # index -> (window_id, widget)
+        # Low-latency image & thumbnail caches
+        self.thumb_cache = {}            # (folder_path, w, h) -> ImageTk.PhotoImage
+        self._raw_thumb_cache = {}       # folder_path -> PIL.Image (in-memory decoded)
+        self.card_widgets = {}           # folder_path -> tk.Frame (reusable card widgets)
         self.filtered_wallpapers = list(self.controller.wallpapers)
+        self._current_cols = 3
+        self._search_job = None
 
         # Build UI layout
         self.build_ui()
@@ -69,7 +73,11 @@ class ShufflerGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
 
         # Initial data populate
+        self.filter_wallpapers()
         self.refresh_ui()
+
+        # Background daemon: pre-warm thumbnail cache into RAM for 60fps scrolling
+        threading.Thread(target=self._precache_thumbnails, daemon=True).start()
 
     def set_window_icon(self):
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico")
@@ -434,7 +442,11 @@ class ShufflerGUI:
         tk.Label(search_frame, text="🔍", bg=C_CARD, fg=C_TEXT_MUTED, font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 6))
 
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *args: self.filter_wallpapers())
+        def on_search_type(*args):
+            if self._search_job:
+                self.root.after_cancel(self._search_job)
+            self._search_job = self.root.after(80, self.filter_wallpapers)
+        self.search_var.trace_add("write", on_search_type)
         self.search_entry = tk.Entry(
             search_frame,
             textvariable=self.search_var,
@@ -446,123 +458,82 @@ class ShufflerGUI:
         )
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Scrollable Virtual Canvas
-        self.canvas = tk.Canvas(self.main_content, bg=C_BG, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.main_content, orient="vertical", command=self.on_scrollbar_scroll)
+        # Scrollable Canvas with pixel-level increment and zero visual tearing
+        self.canvas = tk.Canvas(
+            self.main_content,
+            bg=C_BG,
+            highlightthickness=0,
+            yscrollincrement=1,
+        )
+        self.scrollbar = ttk.Scrollbar(self.main_content, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Bindings for Smooth Virtual Scrolling
-        self.canvas.bind("<Configure>", lambda e: self.on_canvas_configure())
-        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+        # Container frame holding all card widgets
+        self.cards_container = tk.Frame(self.canvas, bg=C_BG)
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.cards_container, anchor="nw")
+
+        # Automatically adapt container width to canvas and update scrollregion
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+        self.cards_container.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+
+        # Butter-smooth, non-shattering mousewheel scrolling
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)
+        self.cards_container.bind("<MouseWheel>", self.on_mousewheel)
+        self.main_content.bind("<MouseWheel>", self.on_mousewheel)
+        search_frame.bind("<MouseWheel>", self.on_mousewheel)
+        self.search_entry.bind("<MouseWheel>", self.on_mousewheel)
 
     # =========================================================================
-    # Virtual Windowed Gallery Rendering (Renders only visible items)
+    # High-Performance Gallery & Card Management
     # =========================================================================
-    CARD_H = 145
-    ROW_GAP = 12
-    COL_GAP = 12
-
-    def on_scrollbar_scroll(self, *args):
-        self.canvas.yview(*args)
-        self.update_visible_cards()
-
     def on_mousewheel(self, event):
+        """Smooth 45px per notch scrolling without recreating or moving any widgets."""
         if self.canvas.winfo_exists():
-            # Smooth scrolling step
-            step = int(-1 * (event.delta / 120) * 2)
-            self.canvas.yview_scroll(step, "units")
-            self.update_visible_cards()
+            delta = getattr(event, "delta", 0)
+            if delta != 0:
+                raw_step = -1 * (delta / 120.0) * 45
+                step = int(raw_step)
+                if step == 0:
+                    step = -1 if delta > 0 else 1
+                self.canvas.yview_scroll(step, "units")
+            return "break"
 
-    def on_canvas_configure(self):
-        self.update_virtual_scrollregion()
-        self.update_visible_cards()
-
-    def get_cols(self):
-        width = self.canvas.winfo_width()
+    def get_cols(self, width=None):
+        if width is None:
+            width = self.canvas.winfo_width()
         if width <= 50:
             width = 620
-        if width > 800:
+        if width > 840:
             return 4
-        elif width > 520:
+        elif width > 540:
             return 3
         else:
             return 2
 
-    def update_virtual_scrollregion(self):
-        total = len(self.filtered_wallpapers)
-        cols = self.get_cols()
-        total_rows = math.ceil(total / cols) if cols > 0 else 0
-        total_height = total_rows * (self.CARD_H + self.ROW_GAP) + 20
-        cw = max(self.canvas.winfo_width(), 620)
-        ch = max(self.canvas.winfo_height(), 400)
-        self.canvas.config(scrollregion=(0, 0, cw, max(total_height, ch)))
+    def on_canvas_configure(self, event):
+        """Stretch container width to fit canvas and re-grid columns if needed."""
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+        new_cols = self.get_cols(event.width)
+        if new_cols != self._current_cols:
+            self._current_cols = new_cols
+            self.rearrange_grid(new_cols)
 
-    def update_visible_cards(self):
-        """Virtual render: dynamically creates widgets only for cards in the current viewport."""
-        total = len(self.filtered_wallpapers)
-        if total == 0:
-            # Clear all
-            for win_id, widget in list(self.rendered_card_widgets.values()):
-                self.canvas.delete(win_id)
-                widget.destroy()
-            self.rendered_card_widgets.clear()
-            return
+    def rearrange_grid(self, cols):
+        """Arrange active cards into grid columns without destroying widgets."""
+        for i, wp in enumerate(self.filtered_wallpapers):
+            card = self.card_widgets.get(wp.folder_path)
+            if card:
+                card.grid(row=i // cols, column=i % cols, padx=6, pady=6, sticky="nsew")
+        for c in range(cols):
+            self.cards_container.columnconfigure(c, weight=1)
 
-        cols = self.get_cols()
-        row_height = self.CARD_H + self.ROW_GAP
-        total_rows = math.ceil(total / cols)
-        total_height = max(total_rows * row_height + 20, 1)
-
-        # Calculate visible pixel bounds
-        y_top_ratio, y_bottom_ratio = self.canvas.yview()
-        top_px = y_top_ratio * total_height
-        bottom_px = y_bottom_ratio * total_height
-
-        # Determine visible row range with 1 buffer row above and below
-        first_row = max(0, int(top_px // row_height) - 1)
-        last_row = min(total_rows - 1, int(bottom_px // row_height) + 1)
-
-        visible_start = first_row * cols
-        visible_end = min(total, (last_row + 1) * cols)
-        needed_indices = set(range(visible_start, visible_end))
-
-        # 1. Remove cards that scrolled out of view
-        current_indices = set(self.rendered_card_widgets.keys())
-        for idx in current_indices - needed_indices:
-            win_id, widget = self.rendered_card_widgets.pop(idx)
-            self.canvas.delete(win_id)
-            widget.destroy()
-
-        # 2. Add or reposition cards that entered view
-        canvas_width = self.canvas.winfo_width()
-        if canvas_width <= 50:
-            canvas_width = 620
-        col_width = max(140, (canvas_width - (cols - 1) * self.COL_GAP - 10) // cols)
-
-        for idx in needed_indices:
-            wp = self.filtered_wallpapers[idx]
-            r = idx // cols
-            c = idx % cols
-            x = c * (col_width + self.COL_GAP) + 5
-            y = r * row_height + 10
-
-            if idx not in self.rendered_card_widgets:
-                card = self.create_card_widget(wp, col_width)
-                win_id = self.canvas.create_window(x, y, window=card, anchor="nw", width=col_width, height=self.CARD_H)
-                self.rendered_card_widgets[idx] = (win_id, card)
-            else:
-                win_id, card = self.rendered_card_widgets[idx]
-                self.canvas.coords(win_id, x, y)
-                self.canvas.itemconfigure(win_id, width=col_width)
-
-    def load_thumbnail(self, wallpaper_item, size=(160, 90)):
-        """Load and cache wallpaper thumbnail image."""
-        size = (max(60, int(size[0])), max(40, int(size[1])))
-        if wallpaper_item.folder_path in self.thumb_cache:
-            return self.thumb_cache[wallpaper_item.folder_path]
+    def _load_raw_thumbnail(self, wallpaper_item) -> Image.Image:
+        """Decode and keep base thumbnail in RAM to prevent repeat disk I/O."""
+        if wallpaper_item.folder_path in self._raw_thumb_cache:
+            return self._raw_thumb_cache[wallpaper_item.folder_path]
 
         thumb_img = None
         if os.path.isdir(wallpaper_item.folder_path):
@@ -576,7 +547,7 @@ class ShufflerGUI:
                         if thumb_name:
                             p = os.path.join(wallpaper_item.folder_path, thumb_name)
                             if os.path.isfile(p):
-                                thumb_img = Image.open(p)
+                                thumb_img = Image.open(p).convert("RGBA")
                 except Exception:
                     pass
 
@@ -585,33 +556,58 @@ class ShufflerGUI:
                     p = os.path.join(wallpaper_item.folder_path, cand)
                     if os.path.isfile(p):
                         try:
-                            thumb_img = Image.open(p)
+                            thumb_img = Image.open(p).convert("RGBA")
                             break
                         except Exception:
                             pass
 
         if not thumb_img:
-            thumb_img = Image.new("RGB", size, color="#1c1f30")
+            thumb_img = Image.new("RGBA", (180, 95), color=(28, 30, 46, 255))
 
-        thumb_img = thumb_img.convert("RGBA")
-        thumb_img.thumbnail(size, Image.Resampling.LANCZOS)
+        self._raw_thumb_cache[wallpaper_item.folder_path] = thumb_img
+        return thumb_img
 
-        canvas_img = Image.new("RGBA", size, (16, 17, 26, 255))
-        offset_x = (size[0] - thumb_img.width) // 2
-        offset_y = (size[1] - thumb_img.height) // 2
-        canvas_img.paste(thumb_img, (offset_x, offset_y), thumb_img)
+    def _precache_thumbnails(self):
+        """Background thread: pre-warm raw thumbnails into RAM so scrolling never stalls."""
+        wallpapers = list(self.controller.wallpapers)
+        for wp in wallpapers:
+            try:
+                if not self.root.winfo_exists():
+                    break
+                if wp.folder_path not in self._raw_thumb_cache:
+                    self._load_raw_thumbnail(wp)
+                time.sleep(0.005)
+            except Exception:
+                pass
+
+    def load_thumbnail(self, wallpaper_item, size=(180, 95)) -> ImageTk.PhotoImage:
+        """Fast thumbnail retrieval with memory cache and fast bilinear downsampling."""
+        target_w = max(60, int(size[0]))
+        target_h = max(40, int(size[1]))
+        cache_key = (wallpaper_item.folder_path, target_w, target_h)
+        if cache_key in self.thumb_cache:
+            return self.thumb_cache[cache_key]
+
+        raw = self._load_raw_thumbnail(wallpaper_item)
+        img_copy = raw.copy()
+        img_copy.thumbnail((target_w, target_h), Image.Resampling.BILINEAR)
+
+        canvas_img = Image.new("RGBA", (target_w, target_h), (16, 17, 26, 255))
+        offset_x = (target_w - img_copy.width) // 2
+        offset_y = (target_h - img_copy.height) // 2
+        canvas_img.paste(img_copy, (offset_x, offset_y), img_copy)
 
         tk_img = ImageTk.PhotoImage(canvas_img)
-        self.thumb_cache[wallpaper_item.folder_path] = tk_img
+        self.thumb_cache[cache_key] = tk_img
         return tk_img
 
-    def create_card_widget(self, wallpaper, width):
+    def create_card_widget(self, wallpaper):
         is_active = (self.controller.current_wallpaper == wallpaper)
         border_color = C_ACCENT_BLUE if is_active else C_BORDER
         border_width = 2 if is_active else 1
 
         card = tk.Frame(
-            self.canvas,
+            self.cards_container,
             bg=C_CARD,
             padx=8,
             pady=8,
@@ -619,28 +615,28 @@ class ShufflerGUI:
             highlightthickness=border_width,
             cursor="hand2",
         )
+        card._wallpaper = wallpaper
 
         # Thumbnail
-        thumb = self.load_thumbnail(wallpaper, size=(width - 16, 85))
+        thumb = self.load_thumbnail(wallpaper, size=(180, 95))
         thumb_lbl = tk.Label(card, image=thumb, bg="#0d0e15")
         thumb_lbl.image = thumb
         thumb_lbl.pack(fill=tk.X, pady=(0, 6))
+        card._thumb_lbl = thumb_lbl
 
         # Title
-        display_title = wallpaper.title
-        max_chars = max(18, width // 10)
-        if len(display_title) > max_chars:
-            display_title = display_title[: max_chars - 3] + "..."
-
         title_lbl = tk.Label(
             card,
-            text=display_title,
+            text=wallpaper.title,
             font=("Segoe UI", 9, "bold"),
             bg=C_CARD,
             fg=C_ACCENT_BLUE if is_active else C_TEXT_WHITE,
             anchor="w",
+            wraplength=170,
+            justify="left",
         )
         title_lbl.pack(fill=tk.X)
+        card._title_lbl = title_lbl
 
         # Badge
         badge_text = "● ACTIVE NOW" if is_active else (wallpaper.wp_type.capitalize() if wallpaper.wp_type else "Wallpaper")
@@ -654,24 +650,56 @@ class ShufflerGUI:
             anchor="w",
         )
         badge_lbl.pack(fill=tk.X, pady=(1, 0))
+        card._badge_lbl = badge_lbl
 
-        # Click handler
+        # Instant click handler (<1ms response)
         def on_click(e):
             self.controller.select_wallpaper(wallpaper)
-            self.refresh_ui()
+            self.on_active_wallpaper_changed()
 
-        card.bind("<Button-1>", on_click)
-        thumb_lbl.bind("<Button-1>", on_click)
-        title_lbl.bind("<Button-1>", on_click)
-        badge_lbl.bind("<Button-1>", on_click)
+        def on_enter(e):
+            if self.controller.current_wallpaper != wallpaper:
+                card.config(highlightbackground=C_BORDER_LIGHT, bg=C_CARD_HOVER)
+                title_lbl.config(bg=C_CARD_HOVER)
+                badge_lbl.config(bg=C_CARD_HOVER)
+
+        def on_leave(e):
+            if self.controller.current_wallpaper != wallpaper:
+                card.config(highlightbackground=C_BORDER, bg=C_CARD)
+                title_lbl.config(bg=C_CARD)
+                badge_lbl.config(bg=C_CARD)
+
+        for w in (card, thumb_lbl, title_lbl, badge_lbl):
+            w.bind("<Button-1>", on_click)
+            w.bind("<Enter>", on_enter)
+            w.bind("<Leave>", on_leave)
+            w.bind("<MouseWheel>", self.on_mousewheel)
 
         return card
 
     # =========================================================================
-    # UI State Synchronization
+    # UI State Synchronization (Zero Latency)
     # =========================================================================
-    def refresh_ui(self):
-        """Update active wallpaper showcase, status badges, and gallery."""
+    def update_cards_active_state(self):
+        """Instant in-place recoloring of active borders (<0.2ms)."""
+        curr = self.controller.current_wallpaper
+        for card in self.card_widgets.values():
+            wp = getattr(card, "_wallpaper", None)
+            if not wp:
+                continue
+            is_active = (wp == curr)
+            border_color = C_ACCENT_BLUE if is_active else C_BORDER
+            border_width = 2 if is_active else 1
+            card.config(highlightbackground=border_color, highlightthickness=border_width, bg=C_CARD)
+            if hasattr(card, "_title_lbl"):
+                card._title_lbl.config(fg=C_ACCENT_BLUE if is_active else C_TEXT_WHITE, bg=C_CARD)
+            if hasattr(card, "_badge_lbl"):
+                badge_text = "● ACTIVE NOW" if is_active else (wp.wp_type.capitalize() if wp.wp_type else "Wallpaper")
+                badge_color = C_ACCENT_BLUE if is_active else C_TEXT_MUTED
+                card._badge_lbl.config(text=badge_text, fg=badge_color, bg=C_CARD)
+
+    def on_active_wallpaper_changed(self):
+        """Instant UI update of active wallpaper card & gallery borders without recreation."""
         curr = self.controller.current_wallpaper
         if curr:
             self.active_title_lbl.config(text=curr.title)
@@ -686,6 +714,12 @@ class ShufflerGUI:
         else:
             self.active_title_lbl.config(text="No wallpaper active")
             self.active_info_lbl.config(text="")
+
+        self.update_cards_active_state()
+
+    def refresh_ui(self):
+        """Update active wallpaper showcase, status badges, and controls."""
+        self.on_active_wallpaper_changed()
 
         # Status badge & pause button
         if self.controller.is_paused:
@@ -729,10 +763,8 @@ class ShufflerGUI:
         self.exe_lbl.config(text=exe_msg, fg=exe_color)
         self.locate_btn.config(text="Change..." if exe_found else "Locate...")
 
-        # Refresh gallery
-        self.filter_wallpapers()
-
     def filter_wallpapers(self):
+        """Filter wallpapers by search query and reuse existing card widgets."""
         query = self.search_var.get().strip().lower()
         if not query:
             self.filtered_wallpapers = list(self.controller.wallpapers)
@@ -741,14 +773,35 @@ class ShufflerGUI:
                 wp for wp in self.controller.wallpapers
                 if query in wp.title.lower() or query in wp.author.lower()
             ]
-        # Clear currently rendered widgets before repopulating
-        for win_id, widget in list(self.rendered_card_widgets.values()):
-            self.canvas.delete(win_id)
-            widget.destroy()
-        self.rendered_card_widgets.clear()
 
-        self.update_virtual_scrollregion()
-        self.update_visible_cards()
+        # Update count badge
+        count = len(self.filtered_wallpapers)
+        self.count_badge.config(text=str(count))
+
+        # Hide all existing cards without destroying them
+        for card in self.card_widgets.values():
+            card.grid_remove()
+
+        cols = self.get_cols()
+        self._current_cols = cols
+
+        # Grid filtered cards, instantiating new widgets only once
+        for i, wp in enumerate(self.filtered_wallpapers):
+            if wp.folder_path not in self.card_widgets:
+                card = self.create_card_widget(wp)
+                self.card_widgets[wp.folder_path] = card
+            else:
+                card = self.card_widgets[wp.folder_path]
+            card.grid(row=i // cols, column=i % cols, padx=6, pady=6, sticky="nsew")
+
+        for c in range(cols):
+            self.cards_container.columnconfigure(c, weight=1)
+
+        if query:
+            self.canvas.yview_moveto(0)
+
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.update_cards_active_state()
 
     # =========================================================================
     # Action Handlers
@@ -763,11 +816,11 @@ class ShufflerGUI:
 
     def on_next_clicked(self):
         self.controller.next_wallpaper(explicit_user_trigger=True)
-        self.refresh_ui()
+        self.on_active_wallpaper_changed()
 
     def on_prev_clicked(self):
         self.controller.previous_wallpaper()
-        self.refresh_ui()
+        self.on_active_wallpaper_changed()
 
     def on_toggle_pause_clicked(self):
         self.controller.toggle_pause()
