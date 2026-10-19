@@ -52,8 +52,8 @@ class ShufflerGUI:
         self.root = root
 
         self.root.title("Lively Wallpaper Shuffler")
-        self.root.geometry("1020x720")
-        self.root.minsize(880, 580)
+        self.root.geometry("1040x740")
+        self.root.minsize(900, 620)
         self.root.configure(bg=C_BG)
 
         self.set_window_icon()
@@ -75,6 +75,9 @@ class ShufflerGUI:
         # Initial data populate
         self.filter_wallpapers()
         self.refresh_ui()
+
+        # Dynamic status tick (updates if night mode window starts/ends)
+        self._schedule_status_tick()
 
         # Background daemon: pre-warm thumbnail cache into RAM for 60fps scrolling
         threading.Thread(target=self._precache_thumbnails, daemon=True).start()
@@ -309,6 +312,111 @@ class ShufflerGUI:
             interval_grid.columnconfigure(col, weight=1)
             self.interval_buttons[sec] = btn
 
+        # --- Night Mode / Sleep Hours (Auto-Pause) ---
+        tk.Label(
+            self.sidebar,
+            text="NIGHT MODE (AUTO-PAUSE)",
+            font=("Segoe UI", 8, "bold"),
+            bg=C_SIDEBAR,
+            fg=C_TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 4))
+
+        night_card = tk.Frame(
+            self.sidebar,
+            bg=C_CARD,
+            padx=10,
+            pady=8,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+        )
+        night_card.pack(fill=tk.X, pady=(0, 12))
+
+        self.night_mode_var = tk.BooleanVar(value=self.controller.night_mode_enabled)
+        self.night_mode_check = tk.Checkbutton(
+            night_card,
+            text="Pause shuffling at night",
+            variable=self.night_mode_var,
+            font=("Segoe UI", 9, "bold"),
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            selectcolor=C_BG,
+            activebackground=C_CARD,
+            activeforeground=C_TEXT_WHITE,
+            cursor="hand2",
+            command=self.on_night_mode_toggled,
+        )
+        self.night_mode_check.pack(anchor="w", pady=(0, 6))
+
+        # Time range row: From [ Start ] To [ End ]
+        self.time_row = tk.Frame(night_card, bg=C_CARD)
+        self.time_row.pack(fill=tk.X)
+
+        self.from_lbl = tk.Label(self.time_row, text="From:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
+        self.from_lbl.pack(side=tk.LEFT, padx=(0, 4))
+
+        HOURLY_PRESETS = [f"{h:02d}:00" for h in range(24)]
+
+        self.night_start_var = tk.StringVar(value=self.controller.night_mode_start)
+        self.start_menu = tk.OptionMenu(
+            self.time_row,
+            self.night_start_var,
+            *HOURLY_PRESETS,
+            command=lambda val: self.on_night_times_changed(),
+        )
+        self.start_menu.config(
+            bg=C_BG,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+            font=("Segoe UI", 9, "bold"),
+            padx=6,
+            pady=2,
+            cursor="hand2",
+        )
+        self.start_menu["menu"].config(
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_ACCENT_BLUE,
+            activeforeground="#ffffff",
+            font=("Segoe UI", 9),
+        )
+        self.start_menu.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.to_lbl = tk.Label(self.time_row, text="To:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
+        self.to_lbl.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.night_end_var = tk.StringVar(value=self.controller.night_mode_end)
+        self.end_menu = tk.OptionMenu(
+            self.time_row,
+            self.night_end_var,
+            *HOURLY_PRESETS,
+            command=lambda val: self.on_night_times_changed(),
+        )
+        self.end_menu.config(
+            bg=C_BG,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C_BORDER,
+            font=("Segoe UI", 9, "bold"),
+            padx=6,
+            pady=2,
+            cursor="hand2",
+        )
+        self.end_menu["menu"].config(
+            bg=C_CARD,
+            fg=C_TEXT_WHITE,
+            activebackground=C_ACCENT_BLUE,
+            activeforeground="#ffffff",
+            font=("Segoe UI", 9),
+        )
+        self.end_menu.pack(side=tk.LEFT)
+
         # --- Options (Autostart) ---
         self.autostart_var = tk.BooleanVar(value=self.controller.start_with_windows)
         self.autostart_check = tk.Checkbutton(
@@ -324,7 +432,7 @@ class ShufflerGUI:
             cursor="hand2",
             command=self.on_autostart_toggled,
         )
-        self.autostart_check.pack(anchor="w", pady=(4, 14))
+        self.autostart_check.pack(anchor="w", pady=(0, 10))
 
         # --- Status at Bottom of Sidebar ---
         status_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
@@ -725,6 +833,12 @@ class ShufflerGUI:
         if self.controller.is_paused:
             self.status_badge.config(text="● Paused", fg=C_ACCENT_AMBER)
             self.pause_btn.config(text="▶ Resume Shuffle", bg=C_ACCENT_GREEN, fg="#ffffff")
+        elif self.controller.is_night_mode_active():
+            self.status_badge.config(
+                text=f"🌙 Night Mode (Paused until {self.controller.night_mode_end})",
+                fg="#a78bfa",
+            )
+            self.pause_btn.config(text="⏸ Pause Shuffle", bg=C_CARD, fg=C_TEXT_WHITE)
         else:
             label = self.controller.format_interval(self.controller.interval_seconds)
             self.status_badge.config(
@@ -747,6 +861,19 @@ class ShufflerGUI:
                 btn.config(bg=C_ACCENT_BLUE, fg="#ffffff")
             else:
                 btn.config(bg=C_CARD, fg=C_TEXT_PRIMARY)
+
+        # Night mode controls state & colors
+        if hasattr(self, "night_mode_var"):
+            is_night_on = self.controller.night_mode_enabled
+            self.night_mode_var.set(is_night_on)
+            self.night_start_var.set(self.controller.night_mode_start)
+            self.night_end_var.set(self.controller.night_mode_end)
+            state = "normal" if is_night_on else "disabled"
+            fg_col = C_TEXT_WHITE if is_night_on else C_TEXT_MUTED
+            self.start_menu.config(state=state, fg=fg_col)
+            self.end_menu.config(state=state, fg=fg_col)
+            self.from_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
+            self.to_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
 
         # Counts
         count = len(self.controller.wallpapers)
@@ -865,12 +992,54 @@ class ShufflerGUI:
         self.thumb_cache.clear()
         self.refresh_ui()
 
+    def on_night_mode_toggled(self):
+        enabled = self.night_mode_var.get()
+        start = self.night_start_var.get()
+        end = self.night_end_var.get()
+        self.controller.set_night_mode(enabled, start_time=start, end_time=end)
+        self.refresh_ui()
+
+    def on_night_times_changed(self):
+        start = self.night_start_var.get()
+        end = self.night_end_var.get()
+        self.controller.set_night_mode(self.night_mode_var.get(), start_time=start, end_time=end)
+        self.refresh_ui()
+
+    def _schedule_status_tick(self):
+        """Periodic status update to reflect night mode entering/leaving while GUI is open."""
+        if hasattr(self, "root") and self.root.winfo_exists():
+            try:
+                if not self.controller.is_paused:
+                    if self.controller.is_night_mode_active():
+                        self.status_badge.config(
+                            text=f"🌙 Night Mode (Paused until {self.controller.night_mode_end})",
+                            fg="#a78bfa",
+                        )
+                    else:
+                        label = self.controller.format_interval(self.controller.interval_seconds)
+                        self.status_badge.config(
+                            text=f"● Active ({self.controller.mode.capitalize()} • {label})",
+                            fg=C_ACCENT_GREEN,
+                        )
+            except Exception:
+                pass
+            self.root.after(10000, self._schedule_status_tick)
+
     def on_close_window(self):
         # Minimize / hide to system tray
         self.root.withdraw()
 
     def show_window(self):
         self.root.deiconify()
+        self.root.state("normal")
         self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.attributes("-topmost", False)
+        try:
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
         self.root.focus_force()
         self.refresh_ui()

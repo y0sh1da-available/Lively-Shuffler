@@ -17,6 +17,7 @@ import threading
 import subprocess
 import glob
 import queue
+import datetime
 from pathlib import Path
 from PIL import Image, ImageDraw
 import pystray
@@ -503,6 +504,36 @@ class WallpaperItem:
         return f"<Wallpaper: {self.title}>"
 
 
+def is_time_between(start_str: str, end_str: str, check_time: datetime.time = None) -> bool:
+    """
+    Check if check_time (or current local time) falls within the window [start_str, end_str).
+    Handles ranges that cross midnight (e.g. 23:00 to 07:00).
+    Format: 'HH:MM' or 'H:M'.
+    """
+    try:
+        sh, sm = map(int, start_str.strip().split(":"))
+        eh, em = map(int, end_str.strip().split(":"))
+        start_min = sh * 60 + sm
+        end_min = eh * 60 + em
+
+        if check_time is None:
+            now = datetime.datetime.now().time()
+        else:
+            now = check_time
+        curr_min = now.hour * 60 + now.minute
+
+        if start_min == end_min:
+            return False
+        elif start_min < end_min:
+            return start_min <= curr_min < end_min
+        else:
+            # Range crosses midnight (e.g. 23:00 to 07:00)
+            return curr_min >= start_min or curr_min < end_min
+    except Exception as e:
+        logger.error("Error evaluating night mode window (%s - %s): %s", start_str, end_str, e)
+        return False
+
+
 class ShufflerController:
     def __init__(self):
         self.custom_lively_exe: str | None = None
@@ -519,6 +550,11 @@ class ShufflerController:
         self.is_paused = False
         self.start_with_windows = False
         self.sequential_index = 0
+
+        # Night mode (sleep hours auto-pause)
+        self.night_mode_enabled: bool = False
+        self.night_mode_start: str = "23:00"
+        self.night_mode_end: str = "07:00"
 
         # Concurrency & loop control
         self.lock = threading.Lock()
@@ -570,6 +606,9 @@ class ShufflerController:
                     self.interval_seconds = cfg.get("interval_seconds", 300)
                     self.mode = cfg.get("mode", "shuffle")
                     self.is_paused = cfg.get("is_paused", False)
+                    self.night_mode_enabled = cfg.get("night_mode_enabled", False)
+                    self.night_mode_start = cfg.get("night_mode_start", "23:00")
+                    self.night_mode_end = cfg.get("night_mode_end", "07:00")
                     self.custom_lively_exe = cfg.get("custom_lively_exe")
                     self.custom_directories = cfg.get("custom_directories", [])
             except Exception as e:
@@ -583,6 +622,9 @@ class ShufflerController:
                 "interval_seconds": self.interval_seconds,
                 "mode": self.mode,
                 "is_paused": self.is_paused,
+                "night_mode_enabled": self.night_mode_enabled,
+                "night_mode_start": self.night_mode_start,
+                "night_mode_end": self.night_mode_end,
                 "start_with_windows": self.start_with_windows,
                 "custom_lively_exe": self.custom_lively_exe,
                 "custom_directories": self.custom_directories,
@@ -850,11 +892,40 @@ class ShufflerController:
         self.save_config()
         self.notify_gui()
 
+    def is_night_mode_active(self) -> bool:
+        """Check if night mode is enabled and current local time is inside the configured window."""
+        if not self.night_mode_enabled:
+            return False
+        return is_time_between(self.night_mode_start, self.night_mode_end)
+
+    def set_night_mode(self, enabled: bool, start_time: str = None, end_time: str = None):
+        """Configure and persist night mode settings."""
+        self.night_mode_enabled = enabled
+        if start_time:
+            self.night_mode_start = start_time
+        if end_time:
+            self.night_mode_end = end_time
+        self.save_config()
+        self.update_tray_tooltip()
+        self.wake_event.set()
+        self.notify_gui()
+        logger.info(
+            "Night mode configured: enabled=%s, window=%s - %s",
+            self.night_mode_enabled,
+            self.night_mode_start,
+            self.night_mode_end,
+        )
+
     def update_tray_tooltip(self):
         """Update system tray tooltip and menu labels."""
         if not self.tray_icon:
             return
-        status = "Paused" if self.is_paused else f"Every {self.format_interval(self.interval_seconds)}"
+        if self.is_paused:
+            status = "Paused"
+        elif self.is_night_mode_active():
+            status = f"🌙 Night Mode Active ({self.night_mode_start}-{self.night_mode_end})"
+        else:
+            status = f"Every {self.format_interval(self.interval_seconds)}"
         title = self.current_wallpaper.title if self.current_wallpaper else "None"
         tooltip = f"{APP_NAME}\nWallpaper: {title}\nStatus: {status} ({self.mode.capitalize()})"
         # Max tooltip length on Windows is ~128 chars
@@ -886,6 +957,12 @@ class ShufflerController:
                 self.wake_event.clear()
                 continue
 
+            if self.is_night_mode_active():
+                # Night mode is active: automatically suppress shuffling to avoid waking sleeping screen
+                self.wake_event.wait(timeout=5.0)
+                self.wake_event.clear()
+                continue
+
             # Wait for interval duration, wake up early if event is triggered
             woken = self.wake_event.wait(timeout=self.interval_seconds)
             self.wake_event.clear()
@@ -897,8 +974,8 @@ class ShufflerController:
             if woken:
                 continue
 
-            # Timer expired naturally: cycle wallpaper
-            if not self.is_paused and self.is_running:
+            # Timer expired naturally: cycle wallpaper only if neither paused nor in night mode
+            if not self.is_paused and not self.is_night_mode_active() and self.is_running:
                 self.next_wallpaper(explicit_user_trigger=False)
 
         logger.info("Background timer loop finished.")
@@ -998,9 +1075,29 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
         controller.scan_wallpapers()
         controller.update_tray_tooltip()
 
-    def on_open_dashboard(icon, item):
-        if controller.gui:
-            controller.gui.root.after(0, controller.gui.show_window)
+    def on_open_dashboard(icon=None, item=None):
+        if controller.gui and hasattr(controller.gui, "root"):
+            try:
+                controller.gui.root.after(0, controller.gui.show_window)
+            except Exception:
+                pass
+
+    # Ensure double-click (WM_LBUTTONDBLCLK = 0x0203) and left click on tray icon opens GUI
+    try:
+        import pystray._win32
+        _orig_on_notify = pystray._win32.Icon._on_notify
+
+        def _enhanced_on_notify(self, wparam, lparam):
+            # 0x0202 is WM_LBUTTONUP, 0x0203 is WM_LBUTTONDBLCLK
+            if lparam in (0x0202, 0x0203):
+                on_open_dashboard()
+                self.update_menu()
+            elif self._menu_handle and lparam == pystray._win32.win32.WM_RBUTTONUP:
+                _orig_on_notify(self, wparam, lparam)
+
+        pystray._win32.Icon._on_notify = _enhanced_on_notify
+    except Exception as e:
+        logger.debug("Could not patch pystray _on_notify: %s", e)
 
     def on_exit(icon, item):
         controller.stop()
@@ -1074,6 +1171,19 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
             checked=lambda item: controller.is_paused,
         )
         yield pystray.Menu.SEPARATOR
+
+        def on_toggle_night_mode(icon, item):
+            controller.set_night_mode(not controller.night_mode_enabled)
+
+        night_label = f"Night Mode ({controller.night_mode_start} - {controller.night_mode_end})"
+        if controller.is_night_mode_active():
+            night_label += " [Active]"
+        yield pystray.MenuItem(
+            night_label,
+            on_toggle_night_mode,
+            checked=lambda item: controller.night_mode_enabled,
+        )
+
         yield pystray.MenuItem("Interval", pystray.Menu(get_interval_items))
         yield pystray.MenuItem("Mode", pystray.Menu(get_mode_items))
         yield pystray.MenuItem(wallpapers_menu_title, pystray.Menu(get_wallpaper_items))

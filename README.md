@@ -31,6 +31,7 @@
   - [1. Modern GUI Dashboard](#1-modern-gui-dashboard)
   - [2. System Tray Controls](#2-system-tray-controls)
   - [3. Hotkeys & CLI Commands](#3-hotkeys--cli-commands)
+- [Changelog](CHANGELOG.md)
 - [How It Works (Architecture)](#-how-it-works-architecture)
 - [Developer Guide (Building from Source)](#-developer-guide-building-from-source)
 - [Support & Sponsorship](#-support--sponsorship)
@@ -49,7 +50,8 @@ This project delivers:
 - **Zero Configuration:** Automatically locates Lively's running process, default library directories, and custom user-imported wallpapers.
 - **Modern Visual GUI:** Browse all your live wallpapers in an interactive card gallery with high-resolution thumbnails, live search, and one-click activation.
 - **Silent Background Shuffling:** Shuffles your desktop wallpaper at customizable intervals (`30s` to `4h`) completely invisibly without annoying console popup windows.
-- **System Tray Controls:** Quick actions right by your Windows taskbar clock with single-instance mutex protection.
+- **🌙 Night Time Mode (Auto-Pause):** Automatically pauses shuffling between configured hours (e.g., `23:00` to `07:00`) so wallpaper transitions will not wake your monitor or illuminate a dark room while your PC sleeps.
+- **System Tray Controls:** Quick actions right by your Windows taskbar clock with single-instance mutex protection and double-click to open.
 - **Portable Single-File Binary:** Self-contained executable with zero dependencies or runtime installers needed.
 
 ---
