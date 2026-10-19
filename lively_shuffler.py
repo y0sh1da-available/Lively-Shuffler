@@ -504,17 +504,75 @@ class WallpaperItem:
         return f"<Wallpaper: {self.title}>"
 
 
+def parse_time_to_minutes(time_str: str) -> int | None:
+    """
+    Parse a user-entered time string into minutes from midnight (0..1439).
+    Supports:
+      - 12-hour AM/PM: '11:00 PM', '7:30 AM', '12:45 PM', '11PM', '7am'
+      - 24-hour: '23:00', '07:00', '12:45', '0:30'
+      - Bare hour: '11', '23', '7'
+    """
+    if not time_str:
+        return None
+    s = str(time_str).strip().upper()
+
+    is_pm = "PM" in s
+    is_am = "AM" in s
+    s = s.replace("PM", "").replace("AM", "").strip()
+
+    parts = s.split(":")
+    try:
+        if len(parts) == 2:
+            hour = int(parts[0].strip())
+            minute = int(parts[1].strip())
+        elif len(parts) == 1:
+            hour = int(parts[0].strip())
+            minute = 0
+        else:
+            return None
+
+        if is_pm:
+            if hour < 12:
+                hour += 12
+        elif is_am:
+            if hour == 12:
+                hour = 0
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+
+        return hour * 60 + minute
+    except Exception:
+        return None
+
+
+def format_minutes_to_12h(minutes: int) -> str:
+    """Format minutes from midnight into '11:00 PM', '07:00 AM', etc."""
+    h = (minutes // 60) % 24
+    m = minutes % 60
+    am_pm = "AM" if h < 12 else "PM"
+    h12 = 12 if h % 12 == 0 else h % 12
+    return f"{h12:02d}:{m:02d} {am_pm}"
+
+
+def format_time_display(time_str: str) -> str:
+    """Normalize any time string into clean 'HH:MM AM/PM'."""
+    mins = parse_time_to_minutes(time_str)
+    if mins is not None:
+        return format_minutes_to_12h(mins)
+    return str(time_str)
+
+
 def is_time_between(start_str: str, end_str: str, check_time: datetime.time = None) -> bool:
     """
     Check if check_time (or current local time) falls within the window [start_str, end_str).
-    Handles ranges that cross midnight (e.g. 23:00 to 07:00).
-    Format: 'HH:MM' or 'H:M'.
+    Handles ranges that cross midnight (e.g. 11:00 PM to 07:00 AM).
     """
     try:
-        sh, sm = map(int, start_str.strip().split(":"))
-        eh, em = map(int, end_str.strip().split(":"))
-        start_min = sh * 60 + sm
-        end_min = eh * 60 + em
+        start_min = parse_time_to_minutes(start_str)
+        end_min = parse_time_to_minutes(end_str)
+        if start_min is None or end_min is None:
+            return False
 
         if check_time is None:
             now = datetime.datetime.now().time()
@@ -527,7 +585,7 @@ def is_time_between(start_str: str, end_str: str, check_time: datetime.time = No
         elif start_min < end_min:
             return start_min <= curr_min < end_min
         else:
-            # Range crosses midnight (e.g. 23:00 to 07:00)
+            # Range crosses midnight (e.g. 11:00 PM to 07:00 AM)
             return curr_min >= start_min or curr_min < end_min
     except Exception as e:
         logger.error("Error evaluating night mode window (%s - %s): %s", start_str, end_str, e)
@@ -551,10 +609,10 @@ class ShufflerController:
         self.start_with_windows = False
         self.sequential_index = 0
 
-        # Night mode (sleep hours auto-pause)
+        # Night mode (sleep hours auto-pause, AM/PM format)
         self.night_mode_enabled: bool = False
-        self.night_mode_start: str = "23:00"
-        self.night_mode_end: str = "07:00"
+        self.night_mode_start: str = "11:00 PM"
+        self.night_mode_end: str = "07:00 AM"
 
         # Concurrency & loop control
         self.lock = threading.Lock()
@@ -607,8 +665,8 @@ class ShufflerController:
                     self.mode = cfg.get("mode", "shuffle")
                     self.is_paused = cfg.get("is_paused", False)
                     self.night_mode_enabled = cfg.get("night_mode_enabled", False)
-                    self.night_mode_start = cfg.get("night_mode_start", "23:00")
-                    self.night_mode_end = cfg.get("night_mode_end", "07:00")
+                    self.night_mode_start = format_time_display(cfg.get("night_mode_start", "11:00 PM"))
+                    self.night_mode_end = format_time_display(cfg.get("night_mode_end", "07:00 AM"))
                     self.custom_lively_exe = cfg.get("custom_lively_exe")
                     self.custom_directories = cfg.get("custom_directories", [])
             except Exception as e:
@@ -899,12 +957,12 @@ class ShufflerController:
         return is_time_between(self.night_mode_start, self.night_mode_end)
 
     def set_night_mode(self, enabled: bool, start_time: str = None, end_time: str = None):
-        """Configure and persist night mode settings."""
+        """Configure and persist night mode settings with normalized AM/PM formatting."""
         self.night_mode_enabled = enabled
         if start_time:
-            self.night_mode_start = start_time
+            self.night_mode_start = format_time_display(start_time)
         if end_time:
-            self.night_mode_end = end_time
+            self.night_mode_end = format_time_display(end_time)
         self.save_config()
         self.update_tray_tooltip()
         self.wake_event.set()
@@ -923,7 +981,9 @@ class ShufflerController:
         if self.is_paused:
             status = "Paused"
         elif self.is_night_mode_active():
-            status = f"🌙 Night Mode Active ({self.night_mode_start}-{self.night_mode_end})"
+            s_disp = format_time_display(self.night_mode_start)
+            e_disp = format_time_display(self.night_mode_end)
+            status = f"🌙 Night Mode Active ({s_disp} - {e_disp})"
         else:
             status = f"Every {self.format_interval(self.interval_seconds)}"
         title = self.current_wallpaper.title if self.current_wallpaper else "None"
@@ -1175,7 +1235,9 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
         def on_toggle_night_mode(icon, item):
             controller.set_night_mode(not controller.night_mode_enabled)
 
-        night_label = f"Night Mode ({controller.night_mode_start} - {controller.night_mode_end})"
+        s_disp = format_time_display(controller.night_mode_start)
+        e_disp = format_time_display(controller.night_mode_end)
+        night_label = f"Night Mode ({s_disp} - {e_disp})"
         if controller.is_night_mode_active():
             night_label += " [Active]"
         yield pystray.MenuItem(

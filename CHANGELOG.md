@@ -11,15 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **🌙 Night Time Mode (Auto-Pause Sleep Hours):**
-  - Added a dedicated Night Mode toggle with customizable start time **A** and end time **B** (e.g., `23:00` to `07:00`).
+  - Added a dedicated Night Mode toggle with customizable start time **A** and end time **B**.
+  - **Manual Entry & AM/PM Format:** Allows typing any custom time (e.g., `12:45`, `12:45 PM`, `11:00 PM`, `23:00`, `11pm`) with auto-formatting, alongside convenient preset dropdown buttons.
   - Automatically suppresses timer-based wallpaper switching during sleeping hours to prevent waking up monitors or lightening dark rooms while the PC is asleep.
   - Seamlessly handles overnight time ranges that cross midnight.
   - Automatically resumes normal shuffling when the configured end time arrives without requiring manual intervention.
-  - Displays dynamic status in the dashboard: `🌙 Night Mode (Paused until HH:MM)` and updates tray tooltips.
+  - Displays dynamic status in the dashboard: `🌙 Night Mode (Paused until HH:MM AM/PM)` and updates tray tooltips.
 - **System Tray Night Mode Toggle:**
   - Added a quick-toggle option for Night Mode directly in the system tray right-click menu.
 - **Double-Click System Tray Icon to Open Dashboard:**
   - Double-clicking or clicking the notification area icon immediately restores, lifts, and focuses the main GUI window to the foreground.
+
+### Fixed
+- **Small Window Left-Side Overlap & Sidebar Squashing:**
+  - Replaced rigid sidebar container with a smooth canvas-backed scrollable layout, preventing controls from squashing or overlapping in smaller window sizes.
+  - Added screen boundary protection that guarantees the window is never spawned or positioned off the screen edges ($X \ge 20, Y \ge 20$).
+  - Relaxed minimum window constraints to `760x480` for compact and high-DPI scaling displays.
 
 ---
 

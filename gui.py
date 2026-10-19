@@ -16,6 +16,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog
 from PIL import Image, ImageTk
+from lively_shuffler import parse_time_to_minutes, format_time_display, format_minutes_to_12h
 
 # Enable High-DPI awareness before Tkinter windows are created
 def enable_dpi_awareness():
@@ -52,9 +53,17 @@ class ShufflerGUI:
         self.root = root
 
         self.root.title("Lively Wallpaper Shuffler")
-        self.root.geometry("1040x740")
-        self.root.minsize(900, 620)
+        self.root.minsize(760, 480)
         self.root.configure(bg=C_BG)
+
+        # Center window on screen within safe visible bounds (never off-screen)
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        target_w = min(1020, max(760, sw - 80))
+        target_h = min(660, max(480, sh - 100))
+        init_x = max(20, (sw - target_w) // 2)
+        init_y = max(20, (sh - target_h) // 2)
+        self.root.geometry(f"{target_w}x{target_h}+{init_x}+{init_y}")
 
         self.set_window_icon()
 
@@ -90,18 +99,69 @@ class ShufflerGUI:
             except Exception:
                 pass
 
+    def _bind_mousewheel_recursive(self, parent, handler):
+        """Recursively bind mousewheel scrolling so hovering any child widget scrolls parent."""
+        try:
+            parent.bind("<MouseWheel>", handler)
+            for child in parent.winfo_children():
+                self._bind_mousewheel_recursive(child, handler)
+        except Exception:
+            pass
+
     def build_ui(self):
-        # Left Sidebar (Controls & Active Wallpaper)
-        self.sidebar = tk.Frame(self.root, bg=C_SIDEBAR, width=340, padx=20, pady=20)
-        self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
-        self.sidebar.pack_propagate(False)
+        # Outer Sidebar Frame (fixed width 320, perfectly sized for modern displays)
+        self.sidebar_outer = tk.Frame(self.root, bg=C_SIDEBAR, width=320)
+        self.sidebar_outer.pack(side=tk.LEFT, fill=tk.Y)
+        self.sidebar_outer.pack_propagate(False)
+
+        # Scrollable Sidebar Canvas (prevents any overlap or off-screen hiding in small windows)
+        self.sidebar_canvas = tk.Canvas(
+            self.sidebar_outer,
+            bg=C_SIDEBAR,
+            highlightthickness=0,
+            yscrollincrement=1,
+            width=320,
+        )
+        self.sidebar_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Sidebar content frame inside canvas
+        self.sidebar = tk.Frame(self.sidebar_canvas, bg=C_SIDEBAR, padx=14, pady=12)
+        self.sidebar_window = self.sidebar_canvas.create_window((0, 0), window=self.sidebar, anchor="nw")
+
+        # Automatically update scrollregion and canvas item width on resize
+        self.sidebar.bind(
+            "<Configure>",
+            lambda e: self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all")),
+        )
+        self.sidebar_canvas.bind(
+            "<Configure>",
+            lambda e: self.sidebar_canvas.itemconfig(self.sidebar_window, width=e.width),
+        )
+
+        # Smooth mousewheel scrolling for sidebar
+        def on_sidebar_wheel(event):
+            delta = getattr(event, "delta", 0)
+            if delta != 0:
+                raw_step = -1 * (delta / 120.0) * 35
+                step = int(raw_step)
+                if step == 0:
+                    step = -1 if delta > 0 else 1
+                self.sidebar_canvas.yview_scroll(step, "units")
+            return "break"
+
+        self.on_sidebar_wheel = on_sidebar_wheel
+        self.sidebar_canvas.bind("<MouseWheel>", on_sidebar_wheel)
+        self.sidebar.bind("<MouseWheel>", on_sidebar_wheel)
 
         # Right Main Content (Gallery)
-        self.main_content = tk.Frame(self.root, bg=C_BG, padx=22, pady=20)
+        self.main_content = tk.Frame(self.root, bg=C_BG, padx=18, pady=16)
         self.main_content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.build_sidebar()
         self.build_gallery()
+
+        # Recursively bind sidebar scrolling to all controls
+        self._bind_mousewheel_recursive(self.sidebar, on_sidebar_wheel)
 
     def build_sidebar(self):
         # App Title & Status Badge
@@ -129,12 +189,12 @@ class ShufflerGUI:
         self.active_card = tk.Frame(
             self.sidebar,
             bg=C_CARD,
-            padx=12,
-            pady=12,
+            padx=10,
+            pady=8,
             highlightbackground=C_BORDER,
             highlightthickness=1,
         )
-        self.active_card.pack(fill=tk.X, pady=(0, 16))
+        self.active_card.pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(
             self.active_card,
@@ -142,18 +202,18 @@ class ShufflerGUI:
             font=("Segoe UI", 8, "bold"),
             bg=C_CARD,
             fg=C_TEXT_MUTED,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 4))
 
-        self.active_thumb_lbl = tk.Label(self.active_card, bg="#0d0e15", height=115)
-        self.active_thumb_lbl.pack(fill=tk.X, pady=(0, 8))
+        self.active_thumb_lbl = tk.Label(self.active_card, bg="#0d0e15", height=75)
+        self.active_thumb_lbl.pack(fill=tk.X, pady=(0, 6))
 
         self.active_title_lbl = tk.Label(
             self.active_card,
             text="Loading...",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 10, "bold"),
             bg=C_CARD,
             fg=C_TEXT_WHITE,
-            wraplength=275,
+            wraplength=270,
             justify="left",
         )
         self.active_title_lbl.pack(anchor="w")
@@ -164,10 +224,10 @@ class ShufflerGUI:
             font=("Segoe UI", 8),
             bg=C_CARD,
             fg=C_TEXT_MUTED,
-            wraplength=275,
+            wraplength=270,
             justify="left",
         )
-        self.active_info_lbl.pack(anchor="w", pady=(2, 8))
+        self.active_info_lbl.pack(anchor="w", pady=(1, 6))
 
         tk.Button(
             self.active_card,
@@ -178,15 +238,15 @@ class ShufflerGUI:
             activebackground=C_ACCENT_BLUE,
             activeforeground="#ffffff",
             relief=tk.FLAT,
-            padx=10,
-            pady=4,
+            padx=8,
+            pady=3,
             cursor="hand2",
             command=self.on_open_current_folder,
         ).pack(anchor="e")
 
         # --- Quick Action Buttons (Prev / Next) ---
         nav_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
-        nav_box.pack(fill=tk.X, pady=(0, 12))
+        nav_box.pack(fill=tk.X, pady=(0, 8))
 
         self.prev_btn = tk.Button(
             nav_box,
@@ -197,8 +257,8 @@ class ShufflerGUI:
             activebackground=C_CARD_HOVER,
             activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
-            padx=10,
-            pady=7,
+            padx=8,
+            pady=5,
             cursor="hand2",
             command=self.on_prev_clicked,
         )
@@ -213,8 +273,8 @@ class ShufflerGUI:
             activebackground=C_ACCENT_BLUE_HOVER,
             activeforeground="#ffffff",
             relief=tk.FLAT,
-            padx=10,
-            pady=7,
+            padx=8,
+            pady=5,
             cursor="hand2",
             command=self.on_next_clicked,
         )
@@ -230,11 +290,11 @@ class ShufflerGUI:
             activebackground=C_CARD_HOVER,
             activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
-            pady=7,
+            pady=5,
             cursor="hand2",
             command=self.on_toggle_pause_clicked,
         )
-        self.pause_btn.pack(fill=tk.X, pady=(0, 18))
+        self.pause_btn.pack(fill=tk.X, pady=(0, 10))
 
         # --- Mode Segmented Pill Switch (High Contrast) ---
         tk.Label(
@@ -243,10 +303,10 @@ class ShufflerGUI:
             font=("Segoe UI", 8, "bold"),
             bg=C_SIDEBAR,
             fg=C_TEXT_MUTED,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 4))
 
         mode_switch_frame = tk.Frame(self.sidebar, bg=C_CARD, padx=3, pady=3, highlightbackground=C_BORDER, highlightthickness=1)
-        mode_switch_frame.pack(fill=tk.X, pady=(0, 16))
+        mode_switch_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.mode_shuffle_btn = tk.Button(
             mode_switch_frame,
@@ -254,7 +314,7 @@ class ShufflerGUI:
             font=("Segoe UI", 9, "bold"),
             relief=tk.FLAT,
             padx=8,
-            pady=5,
+            pady=4,
             cursor="hand2",
             command=lambda: self.set_mode_ui("shuffle"),
         )
@@ -266,7 +326,7 @@ class ShufflerGUI:
             font=("Segoe UI", 9, "bold"),
             relief=tk.FLAT,
             padx=8,
-            pady=5,
+            pady=4,
             cursor="hand2",
             command=lambda: self.set_mode_ui("sequential"),
         )
@@ -279,10 +339,10 @@ class ShufflerGUI:
             font=("Segoe UI", 8, "bold"),
             bg=C_SIDEBAR,
             fg=C_TEXT_MUTED,
-        ).pack(anchor="w", pady=(0, 6))
+        ).pack(anchor="w", pady=(0, 4))
 
         interval_grid = tk.Frame(self.sidebar, bg=C_SIDEBAR)
-        interval_grid.pack(fill=tk.X, pady=(0, 16))
+        interval_grid.pack(fill=tk.X, pady=(0, 10))
 
         self.interval_buttons = {}
         presets = [
@@ -305,7 +365,7 @@ class ShufflerGUI:
                 font=("Segoe UI", 8, "bold"),
                 relief=tk.FLAT,
                 cursor="hand2",
-                pady=4,
+                pady=3,
                 command=lambda s=sec: self.set_interval_ui(s),
             )
             btn.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
@@ -329,7 +389,7 @@ class ShufflerGUI:
             highlightbackground=C_BORDER,
             highlightthickness=1,
         )
-        night_card.pack(fill=tk.X, pady=(0, 12))
+        night_card.pack(fill=tk.X, pady=(0, 10))
 
         self.night_mode_var = tk.BooleanVar(value=self.controller.night_mode_enabled)
         self.night_mode_check = tk.Checkbutton(
@@ -347,75 +407,85 @@ class ShufflerGUI:
         )
         self.night_mode_check.pack(anchor="w", pady=(0, 6))
 
-        # Time range row: From [ Start ] To [ End ]
-        self.time_row = tk.Frame(night_card, bg=C_CARD)
-        self.time_row.pack(fill=tk.X)
+        # Time range row: From [ 11:00 PM ] [▾]  To [ 07:00 AM ] [▾]
+        time_row = tk.Frame(night_card, bg=C_CARD)
+        time_row.pack(fill=tk.X)
 
-        self.from_lbl = tk.Label(self.time_row, text="From:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
-        self.from_lbl.pack(side=tk.LEFT, padx=(0, 4))
+        self.from_lbl = tk.Label(time_row, text="From:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
+        self.from_lbl.pack(side=tk.LEFT, padx=(0, 3))
 
-        HOURLY_PRESETS = [f"{h:02d}:00" for h in range(24)]
-
-        self.night_start_var = tk.StringVar(value=self.controller.night_mode_start)
-        self.start_menu = tk.OptionMenu(
-            self.time_row,
-            self.night_start_var,
-            *HOURLY_PRESETS,
-            command=lambda val: self.on_night_times_changed(),
-        )
-        self.start_menu.config(
+        # Start Time Entry (Manual input + AM/PM supported)
+        self.night_start_var = tk.StringVar(value=format_time_display(self.controller.night_mode_start))
+        self.start_entry = tk.Entry(
+            time_row,
+            textvariable=self.night_start_var,
+            font=("Segoe UI", 8, "bold"),
             bg=C_BG,
             fg=C_TEXT_WHITE,
-            activebackground=C_CARD_HOVER,
-            activeforeground=C_TEXT_WHITE,
+            insertbackground=C_TEXT_WHITE,
             relief=tk.FLAT,
             highlightthickness=1,
             highlightbackground=C_BORDER,
-            font=("Segoe UI", 9, "bold"),
-            padx=6,
-            pady=2,
-            cursor="hand2",
+            width=9,
+            justify="center",
         )
-        self.start_menu["menu"].config(
+        self.start_entry.pack(side=tk.LEFT, padx=(0, 1))
+        self.start_entry.bind("<FocusOut>", lambda e: self.on_night_times_entered())
+        self.start_entry.bind("<Return>", lambda e: self.on_night_times_entered())
+
+        self.start_btn = tk.Button(
+            time_row,
+            text="▾",
+            font=("Segoe UI", 8),
             bg=C_CARD,
-            fg=C_TEXT_WHITE,
-            activebackground=C_ACCENT_BLUE,
-            activeforeground="#ffffff",
-            font=("Segoe UI", 9),
-        )
-        self.start_menu.pack(side=tk.LEFT, padx=(0, 8))
-
-        self.to_lbl = tk.Label(self.time_row, text="To:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
-        self.to_lbl.pack(side=tk.LEFT, padx=(0, 4))
-
-        self.night_end_var = tk.StringVar(value=self.controller.night_mode_end)
-        self.end_menu = tk.OptionMenu(
-            self.time_row,
-            self.night_end_var,
-            *HOURLY_PRESETS,
-            command=lambda val: self.on_night_times_changed(),
-        )
-        self.end_menu.config(
-            bg=C_BG,
-            fg=C_TEXT_WHITE,
+            fg=C_TEXT_MUTED,
             activebackground=C_CARD_HOVER,
             activeforeground=C_TEXT_WHITE,
             relief=tk.FLAT,
+            padx=2,
+            pady=0,
+            cursor="hand2",
+            command=lambda: self.show_preset_menu(self.start_btn, self.night_start_var),
+        )
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.to_lbl = tk.Label(time_row, text="To:", font=("Segoe UI", 8), bg=C_CARD, fg=C_TEXT_MUTED)
+        self.to_lbl.pack(side=tk.LEFT, padx=(0, 3))
+
+        # End Time Entry (Manual input + AM/PM supported)
+        self.night_end_var = tk.StringVar(value=format_time_display(self.controller.night_mode_end))
+        self.end_entry = tk.Entry(
+            time_row,
+            textvariable=self.night_end_var,
+            font=("Segoe UI", 8, "bold"),
+            bg=C_BG,
+            fg=C_TEXT_WHITE,
+            insertbackground=C_TEXT_WHITE,
+            relief=tk.FLAT,
             highlightthickness=1,
             highlightbackground=C_BORDER,
-            font=("Segoe UI", 9, "bold"),
-            padx=6,
-            pady=2,
-            cursor="hand2",
+            width=9,
+            justify="center",
         )
-        self.end_menu["menu"].config(
+        self.end_entry.pack(side=tk.LEFT, padx=(0, 1))
+        self.end_entry.bind("<FocusOut>", lambda e: self.on_night_times_entered())
+        self.end_entry.bind("<Return>", lambda e: self.on_night_times_entered())
+
+        self.end_btn = tk.Button(
+            time_row,
+            text="▾",
+            font=("Segoe UI", 8),
             bg=C_CARD,
-            fg=C_TEXT_WHITE,
-            activebackground=C_ACCENT_BLUE,
-            activeforeground="#ffffff",
-            font=("Segoe UI", 9),
+            fg=C_TEXT_MUTED,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
+            relief=tk.FLAT,
+            padx=2,
+            pady=0,
+            cursor="hand2",
+            command=lambda: self.show_preset_menu(self.end_btn, self.night_end_var),
         )
-        self.end_menu.pack(side=tk.LEFT)
+        self.end_btn.pack(side=tk.LEFT)
 
         # --- Options (Autostart) ---
         self.autostart_var = tk.BooleanVar(value=self.controller.start_with_windows)
@@ -434,9 +504,9 @@ class ShufflerGUI:
         )
         self.autostart_check.pack(anchor="w", pady=(0, 10))
 
-        # --- Status at Bottom of Sidebar ---
+        # --- Status at Bottom of Sidebar (packed sequentially, never overlaps) ---
         status_box = tk.Frame(self.sidebar, bg=C_SIDEBAR)
-        status_box.pack(side=tk.BOTTOM, fill=tk.X)
+        status_box.pack(fill=tk.X, pady=(4, 12))
 
         exe_row = tk.Frame(status_box, bg=C_SIDEBAR)
         exe_row.pack(fill=tk.X, pady=(0, 3))
@@ -816,7 +886,7 @@ class ShufflerGUI:
                 info += f" • By {curr.author}"
             self.active_info_lbl.config(text=info)
 
-            active_thumb = self.load_thumbnail(curr, size=(280, 115))
+            active_thumb = self.load_thumbnail(curr, size=(250, 75))
             self.active_thumb_lbl.config(image=active_thumb)
             self.active_thumb_lbl.image = active_thumb
         else:
@@ -834,8 +904,9 @@ class ShufflerGUI:
             self.status_badge.config(text="● Paused", fg=C_ACCENT_AMBER)
             self.pause_btn.config(text="▶ Resume Shuffle", bg=C_ACCENT_GREEN, fg="#ffffff")
         elif self.controller.is_night_mode_active():
+            e_disp = format_time_display(self.controller.night_mode_end)
             self.status_badge.config(
-                text=f"🌙 Night Mode (Paused until {self.controller.night_mode_end})",
+                text=f"🌙 Night Mode (Paused until {e_disp})",
                 fg="#a78bfa",
             )
             self.pause_btn.config(text="⏸ Pause Shuffle", bg=C_CARD, fg=C_TEXT_WHITE)
@@ -866,12 +937,14 @@ class ShufflerGUI:
         if hasattr(self, "night_mode_var"):
             is_night_on = self.controller.night_mode_enabled
             self.night_mode_var.set(is_night_on)
-            self.night_start_var.set(self.controller.night_mode_start)
-            self.night_end_var.set(self.controller.night_mode_end)
+            self.night_start_var.set(format_time_display(self.controller.night_mode_start))
+            self.night_end_var.set(format_time_display(self.controller.night_mode_end))
             state = "normal" if is_night_on else "disabled"
             fg_col = C_TEXT_WHITE if is_night_on else C_TEXT_MUTED
-            self.start_menu.config(state=state, fg=fg_col)
-            self.end_menu.config(state=state, fg=fg_col)
+            self.start_entry.config(state=state, fg=fg_col)
+            self.end_entry.config(state=state, fg=fg_col)
+            self.start_btn.config(state=state)
+            self.end_btn.config(state=state)
             self.from_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
             self.to_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
 
@@ -999,11 +1072,38 @@ class ShufflerGUI:
         self.controller.set_night_mode(enabled, start_time=start, end_time=end)
         self.refresh_ui()
 
-    def on_night_times_changed(self):
-        start = self.night_start_var.get()
-        end = self.night_end_var.get()
-        self.controller.set_night_mode(self.night_mode_var.get(), start_time=start, end_time=end)
+    def on_night_times_entered(self):
+        start_raw = self.night_start_var.get().strip()
+        end_raw = self.night_end_var.get().strip()
+        formatted_start = format_time_display(start_raw)
+        formatted_end = format_time_display(end_raw)
+        self.night_start_var.set(formatted_start)
+        self.night_end_var.set(formatted_end)
+        self.controller.set_night_mode(
+            self.night_mode_var.get(),
+            start_time=formatted_start,
+            end_time=formatted_end,
+        )
         self.refresh_ui()
+
+    def show_preset_menu(self, btn_widget, string_var):
+        menu = tk.Menu(self.root, tearoff=0, bg=C_CARD, fg=C_TEXT_WHITE, activebackground=C_ACCENT_BLUE)
+        presets = [
+            "08:00 PM", "09:00 PM", "10:00 PM", "11:00 PM", "11:30 PM",
+            "12:00 AM", "01:00 AM", "05:00 AM", "06:00 AM", "06:30 AM",
+            "07:00 AM", "07:30 AM", "08:00 AM", "09:00 AM",
+        ]
+        for p in presets:
+            menu.add_command(
+                label=p,
+                command=lambda val=p: (string_var.set(val), self.on_night_times_entered()),
+            )
+        try:
+            x = btn_widget.winfo_rootx()
+            y = btn_widget.winfo_rooty() + btn_widget.winfo_height()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
     def _schedule_status_tick(self):
         """Periodic status update to reflect night mode entering/leaving while GUI is open."""
@@ -1032,6 +1132,24 @@ class ShufflerGUI:
     def show_window(self):
         self.root.deiconify()
         self.root.state("normal")
+        # Ensure window is not positioned off-screen (e.g. left overlap outside of screen)
+        try:
+            x = self.root.winfo_x()
+            y = self.root.winfo_y()
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            # If off the left edge, top edge, or completely out of visible bounds:
+            if x < 20 or y < 20 or x > sw - 100 or y > sh - 100:
+                new_w = min(1040, max(760, sw - 80))
+                new_h = min(660, max(480, sh - 100))
+                new_x = max(20, (sw - new_w) // 2)
+                new_y = max(20, (sh - new_h) // 2)
+                self.root.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
+        except Exception:
+            pass
+
         self.root.lift()
         self.root.attributes("-topmost", True)
         self.root.attributes("-topmost", False)
@@ -1043,3 +1161,4 @@ class ShufflerGUI:
             pass
         self.root.focus_force()
         self.refresh_ui()
+
