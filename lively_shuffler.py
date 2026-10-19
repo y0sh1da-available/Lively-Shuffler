@@ -32,7 +32,7 @@ except Exception:
         pass
 
 APP_NAME = "Lively Wallpaper Shuffler"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 MUTEX_NAME = "Global\\LivelyWallpaperShuffler_SingleInstance_Mutex"
 
 # Common intervals (in seconds)
