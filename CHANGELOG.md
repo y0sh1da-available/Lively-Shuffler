@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **🖥️ Multi-Screen / Multi-Monitor Support:**
+  - Added dedicated **Target Screen** selector dropdown in the dashboard sidebar and system tray menu.
+  - Supports targeting **All Screens (Simultaneous)** or any specific display (e.g., `Screen 1 (1920x1080)`, `Screen 2 (1600x900) [Primary]`).
+  - Automatically queries connected displays and active wallpapers per monitor directly from Lively's configuration and Win32 display APIs.
+  - Seamlessly applies wallpaper transitions across targeted screens via `--monitor <screen-id>`.
+
+---
+
 ## [1.0.4] - 2026-10-19
 
 ### Added

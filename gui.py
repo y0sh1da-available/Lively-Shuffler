@@ -296,6 +296,63 @@ class ShufflerGUI:
         )
         self.pause_btn.pack(fill=tk.X, pady=(0, 10))
 
+        # --- Target Screen Selector (Multi-Monitor Support) ---
+        self.screen_selector_label = tk.Label(
+            self.sidebar,
+            text="TARGET SCREEN",
+            font=("Segoe UI", 8, "bold"),
+            bg=C_SIDEBAR,
+            fg=C_TEXT_MUTED,
+        )
+        self.screen_selector_label.pack(anchor="w", pady=(0, 4))
+
+        self.screen_frame = tk.Frame(
+            self.sidebar,
+            bg=C_CARD,
+            padx=8,
+            pady=6,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+        )
+        self.screen_frame.pack(fill=tk.X, pady=(0, 10))
+
+        scr_top_row = tk.Frame(self.screen_frame, bg=C_CARD)
+        scr_top_row.pack(fill=tk.X)
+
+        self.screen_var = tk.StringVar(value="All Screens (Simultaneous)")
+        self.screen_menu_btn = tk.Button(
+            scr_top_row,
+            textvariable=self.screen_var,
+            font=("Segoe UI", 8, "bold"),
+            bg=C_BG,
+            fg=C_TEXT_WHITE,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
+            relief=tk.FLAT,
+            padx=8,
+            pady=4,
+            cursor="hand2",
+            anchor="w",
+            command=self.show_screen_menu,
+        )
+        self.screen_menu_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.screen_arrow_btn = tk.Button(
+            scr_top_row,
+            text="▾",
+            font=("Segoe UI", 8, "bold"),
+            bg=C_BG,
+            fg=C_TEXT_MUTED,
+            activebackground=C_CARD_HOVER,
+            activeforeground=C_TEXT_WHITE,
+            relief=tk.FLAT,
+            padx=6,
+            pady=4,
+            cursor="hand2",
+            command=self.show_screen_menu,
+        )
+        self.screen_arrow_btn.pack(side=tk.LEFT, padx=(2, 0))
+
         # --- Mode Segmented Pill Switch (High Contrast) ---
         tk.Label(
             self.sidebar,
@@ -948,6 +1005,18 @@ class ShufflerGUI:
             self.from_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
             self.to_lbl.config(fg=C_TEXT_WHITE if is_night_on else C_TEXT_MUTED)
 
+        # Screen selector dropdown text update
+        if hasattr(self, "screen_var"):
+            curr_scr_name = "All Screens (Simultaneous)"
+            if getattr(self.controller, "target_screen", 0) > 0:
+                for s in getattr(self.controller, "connected_screens", []):
+                    if s["index"] == self.controller.target_screen:
+                        curr_scr_name = s["name"]
+                        break
+                else:
+                    curr_scr_name = f"Screen {self.controller.target_screen}"
+            self.screen_var.set(curr_scr_name)
+
         # Counts
         count = len(self.controller.wallpapers)
         self.count_badge.config(text=str(count))
@@ -1006,6 +1075,34 @@ class ShufflerGUI:
     # =========================================================================
     # Action Handlers
     # =========================================================================
+    def show_screen_menu(self):
+        """Display dropdown menu to pick target screen (All screens vs individual display)."""
+        menu = tk.Menu(self.root, tearoff=0, bg=C_CARD, fg=C_TEXT_WHITE, activebackground=C_ACCENT_BLUE)
+        menu.add_command(
+            label="All Screens (Simultaneous)",
+            command=lambda: self.on_select_screen(0, "All Screens (Simultaneous)"),
+        )
+        if hasattr(self.controller, "connected_screens") and self.controller.connected_screens:
+            menu.add_separator()
+            for scr in self.controller.connected_screens:
+                idx = scr["index"]
+                name = scr["name"]
+                menu.add_command(
+                    label=name,
+                    command=lambda i=idx, n=name: self.on_select_screen(i, n),
+                )
+        try:
+            x = self.screen_frame.winfo_rootx()
+            y = self.screen_frame.winfo_rooty() + self.screen_frame.winfo_height()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def on_select_screen(self, screen_index: int, screen_name: str):
+        self.controller.set_target_screen(screen_index)
+        self.screen_var.set(screen_name)
+        self.refresh_ui()
+
     def set_mode_ui(self, mode: str):
         self.controller.set_mode(mode)
         self.refresh_ui()

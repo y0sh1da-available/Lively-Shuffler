@@ -399,11 +399,110 @@ class DiscoveryEngine:
         return dirs[0] if dirs else None
 
     @staticmethod
-    def get_currently_active_wallpaper() -> tuple[str | None, str | None]:
+    def get_connected_screens() -> list[dict]:
+        r"""
+        Discover connected monitors/screens.
+        Reads from Lively's WallpaperLayout.json if available, and falls back to Win32 EnumDisplayMonitors.
+        Returns a list of dicts:
+          [{'index': 1, 'name': 'Screen 1 (1920x1080)', 'device': r'\\.\DISPLAY1', 'is_primary': False}, ...]
+        """
+        screens = []
+        data_roots = DiscoveryEngine.get_lively_data_dirs()
+        for root in data_roots:
+            lf = os.path.join(root, "WallpaperLayout.json")
+            if os.path.isfile(lf):
+                try:
+                    with open(lf, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            for item in data:
+                                scr = item.get("LivelyScreen", {})
+                                idx = scr.get("Index")
+                                if idx is not None:
+                                    dev = scr.get("DeviceName", f"Screen {idx}")
+                                    is_pri = scr.get("IsPrimary", False)
+                                    bounds = scr.get("Bounds", "")
+                                    # Bounds format: "X, Y, Width, Height"
+                                    res_str = ""
+                                    try:
+                                        b_parts = [p.strip() for p in bounds.split(",")]
+                                        if len(b_parts) == 4:
+                                            res_str = f" ({b_parts[2]}x{b_parts[3]})"
+                                    except Exception:
+                                        pass
+                                    pri_tag = " [Primary]" if is_pri else ""
+                                    label = f"Screen {idx}{res_str}{pri_tag}"
+                                    screens.append({
+                                        "index": int(idx),
+                                        "name": label,
+                                        "device": dev,
+                                        "is_primary": is_pri,
+                                    })
+                    if screens:
+                        screens.sort(key=lambda x: x["index"])
+                        return screens
+                except Exception as e:
+                    logger.debug("Failed parsing screens from %s: %s", lf, e)
+
+        # Fallback via Win32 EnumDisplayMonitors if Lively layout not available yet
+        try:
+            class MONITORINFOEXW(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", ctypes.wintypes.DWORD),
+                    ("rcMonitor", ctypes.wintypes.RECT),
+                    ("rcWork", ctypes.wintypes.RECT),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("szDevice", ctypes.wintypes.WCHAR * 32),
+                ]
+
+            user32 = ctypes.windll.user32
+            win_screens = []
+
+            def _cb(hMonitor, hdcMonitor, lprcMonitor, dwData):
+                info = MONITORINFOEXW()
+                info.cbSize = ctypes.sizeof(MONITORINFOEXW)
+                if user32.GetMonitorInfoW(hMonitor, ctypes.byref(info)):
+                    w = abs(info.rcMonitor.right - info.rcMonitor.left)
+                    h = abs(info.rcMonitor.bottom - info.rcMonitor.top)
+                    is_pri = bool(info.dwFlags & 1)
+                    win_screens.append({
+                        "device": info.szDevice,
+                        "is_primary": is_pri,
+                        "res": f"{w}x{h}",
+                    })
+                return True
+
+            MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_int,
+                ctypes.wintypes.HMONITOR,
+                ctypes.wintypes.HDC,
+                ctypes.POINTER(ctypes.wintypes.RECT),
+                ctypes.wintypes.LPARAM,
+            )
+            user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_cb), 0)
+
+            for idx, scr in enumerate(win_screens, 1):
+                pri_tag = " [Primary]" if scr["is_primary"] else ""
+                screens.append({
+                    "index": idx,
+                    "name": f"Screen {idx} ({scr['res']}){pri_tag}",
+                    "device": scr["device"],
+                    "is_primary": scr["is_primary"],
+                })
+        except Exception as e:
+            logger.debug("Win32 monitor enumeration fallback error: %s", e)
+
+        if not screens:
+            screens.append({"index": 1, "name": "Screen 1 [Primary]", "device": r"\\.\DISPLAY1", "is_primary": True})
+        return screens
+
+    @staticmethod
+    def get_currently_active_wallpaper(screen_index: int | None = None) -> tuple[str | None, str | None]:
         """
         Read WallpaperLayout.json across candidate data directories (Standard or Store)
         to find the currently active wallpaper path and title.
-        Prioritizes the most recently updated layout file.
+        If screen_index is provided (e.g. 1 or 2), finds the wallpaper on that specific screen.
+        Otherwise finds the first active or primary screen wallpaper.
         """
         data_roots = DiscoveryEngine.get_lively_data_dirs()
         layout_files = []
@@ -427,7 +526,22 @@ class DiscoveryEngine:
                 with open(layout_file, "r", encoding="utf-8") as f:
                     screens = json.load(f)
                     if isinstance(screens, list) and len(screens) > 0:
-                        info_path = screens[0].get("LivelyInfoPath")
+                        chosen_entry = None
+                        if screen_index is not None and screen_index > 0:
+                            for s in screens:
+                                if s.get("LivelyScreen", {}).get("Index") == screen_index:
+                                    chosen_entry = s
+                                    break
+                        if not chosen_entry:
+                            # Prefer primary screen if screen_index is not specified or not matched
+                            for s in screens:
+                                if s.get("LivelyScreen", {}).get("IsPrimary"):
+                                    chosen_entry = s
+                                    break
+                        if not chosen_entry:
+                            chosen_entry = screens[0]
+
+                        info_path = chosen_entry.get("LivelyInfoPath")
                         if info_path:
                             folder_path = (
                                 info_path if os.path.isdir(info_path) else os.path.dirname(info_path)
@@ -614,6 +728,10 @@ class ShufflerController:
         self.night_mode_start: str = "11:00 PM"
         self.night_mode_end: str = "07:00 AM"
 
+        # Multi-screen support (0 = All Screens, 1 = Screen 1, 2 = Screen 2, ...)
+        self.target_screen: int = 0
+        self.connected_screens: list[dict] = []
+
         # Concurrency & loop control
         self.lock = threading.Lock()
         self.wake_event = threading.Event()
@@ -667,6 +785,7 @@ class ShufflerController:
                     self.night_mode_enabled = cfg.get("night_mode_enabled", False)
                     self.night_mode_start = format_time_display(cfg.get("night_mode_start", "11:00 PM"))
                     self.night_mode_end = format_time_display(cfg.get("night_mode_end", "07:00 AM"))
+                    self.target_screen = int(cfg.get("target_screen", 0))
                     self.custom_lively_exe = cfg.get("custom_lively_exe")
                     self.custom_directories = cfg.get("custom_directories", [])
             except Exception as e:
@@ -683,6 +802,7 @@ class ShufflerController:
                 "night_mode_enabled": self.night_mode_enabled,
                 "night_mode_start": self.night_mode_start,
                 "night_mode_end": self.night_mode_end,
+                "target_screen": self.target_screen,
                 "start_with_windows": self.start_with_windows,
                 "custom_lively_exe": self.custom_lively_exe,
                 "custom_directories": self.custom_directories,
@@ -693,9 +813,10 @@ class ShufflerController:
             logger.error("Failed saving config: %s", e)
 
     def discover_environment(self):
-        """Auto-discover Lively and Wallpapers path."""
+        """Auto-discover Lively, Wallpapers path, and connected displays."""
         self.lively_exe = DiscoveryEngine.find_lively_executable(custom_path=self.custom_lively_exe)
         self.wallpapers_dir = DiscoveryEngine.find_wallpapers_directory()
+        self.connected_screens = DiscoveryEngine.get_connected_screens()
 
     def scan_wallpapers(self):
         """Scan wallpapers directory for valid Lively wallpapers (folders with LivelyInfo.json or direct media files)."""
@@ -773,36 +894,82 @@ class ShufflerController:
             except Exception as e:
                 logger.error("Error during scan_wallpapers: %s", e)
 
+    def set_target_screen(self, screen_index: int):
+        """Set target screen (0 = All Screens, 1 = Screen 1, 2 = Screen 2, ...) and persist."""
+        self.target_screen = int(screen_index)
+        self.save_config()
+        logger.info("Set target screen to %d", self.target_screen)
+        # Update current wallpaper to reflect this screen's wallpaper
+        active_path, active_title = DiscoveryEngine.get_currently_active_wallpaper(screen_index=self.target_screen)
+        if active_path:
+            norm_active = os.path.normcase(os.path.abspath(active_path))
+            for wp in self.wallpapers:
+                if os.path.normcase(os.path.abspath(wp.folder_path)) == norm_active:
+                    self.current_wallpaper = wp
+                    break
+        self.update_tray_tooltip()
+        self.notify_gui()
+
     def _execute_lively_cmd(self, wallpaper: WallpaperItem) -> bool:
-        """Low-level execution of Lively command with lightweight process spawning."""
+        """Low-level execution of Lively command across targeted screen(s)."""
         if not self.lively_exe or not os.path.isfile(self.lively_exe):
             self.lively_exe = DiscoveryEngine.find_lively_executable(custom_path=self.custom_lively_exe)
             if not self.lively_exe:
                 logger.error("Cannot set wallpaper: Lively executable not found.")
                 return False
 
-        cmd = [self.lively_exe, "setwp", "--file", wallpaper.folder_path]
-        logger.info("Switching wallpaper via Lively CLI: %s (%s)", wallpaper.title, wallpaper.folder_path)
+        # If target_screen == 0 (All Screens):
+        # Apply to all discovered screens individually to ensure all monitors update
+        screens_to_update = []
+        if self.target_screen > 0:
+            screens_to_update = [self.target_screen]
+        else:
+            # Refresh screen list
+            self.connected_screens = DiscoveryEngine.get_connected_screens()
+            if len(self.connected_screens) > 1:
+                screens_to_update = [s["index"] for s in self.connected_screens]
+            else:
+                screens_to_update = [None]  # Single screen or default
 
-        try:
-            creation_flags = 0x08000000  # CREATE_NO_WINDOW
-            startup_info = subprocess.STARTUPINFO()
-            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startup_info.wShowWindow = 0  # SW_HIDE
+        creation_flags = 0x08000000  # CREATE_NO_WINDOW
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup_info.wShowWindow = 0  # SW_HIDE
 
-            proc = subprocess.Popen(
-                cmd,
-                creationflags=creation_flags,
-                startupinfo=startup_info,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            proc.wait(timeout=10)
+        success = True
+        for scr_idx in screens_to_update:
+            cmd = [self.lively_exe, "setwp", "--file", wallpaper.folder_path]
+            if scr_idx is not None and scr_idx > 0:
+                cmd.extend(["--monitor", str(scr_idx)])
+                logger.info(
+                    "Switching wallpaper via Lively CLI on Screen %d: %s (%s)",
+                    scr_idx,
+                    wallpaper.title,
+                    wallpaper.folder_path,
+                )
+            else:
+                logger.info(
+                    "Switching wallpaper via Lively CLI: %s (%s)",
+                    wallpaper.title,
+                    wallpaper.folder_path,
+                )
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=creation_flags,
+                    startupinfo=startup_info,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                proc.wait(timeout=10)
+            except Exception as e:
+                logger.error("Failed to execute Lively command on screen %s: %s", scr_idx, e)
+                success = False
+
+        if success:
             logger.info("Successfully applied wallpaper: %s", wallpaper.title)
-            return True
-        except Exception as e:
-            logger.error("Failed to execute Lively command: %s", e)
-            return False
+        return success
 
     def _process_switch_queue(self):
         """Worker thread processing wallpaper switches with latest-item coalescing."""
@@ -1245,6 +1412,37 @@ def build_system_tray(controller: ShufflerController) -> pystray.Icon:
             on_toggle_night_mode,
             checked=lambda item: controller.night_mode_enabled,
         )
+
+        def make_screen_action(idx):
+            return lambda icon, item: controller.set_target_screen(idx)
+
+        def make_screen_check(idx):
+            return lambda item: controller.target_screen == idx
+
+        def get_screen_items():
+            yield pystray.MenuItem(
+                "All Screens (Simultaneous)",
+                make_screen_action(0),
+                checked=make_screen_check(0),
+                radio=True,
+            )
+            for scr in controller.connected_screens:
+                yield pystray.MenuItem(
+                    scr["name"],
+                    make_screen_action(scr["index"]),
+                    checked=make_screen_check(scr["index"]),
+                    radio=True,
+                )
+
+        # Screens menu (if multiple screens detected)
+        if len(controller.connected_screens) > 1:
+            curr_scr_name = "All Screens"
+            if controller.target_screen > 0:
+                for s in controller.connected_screens:
+                    if s["index"] == controller.target_screen:
+                        curr_scr_name = s["name"]
+                        break
+            yield pystray.MenuItem(f"Target Screen: {curr_scr_name}", pystray.Menu(get_screen_items))
 
         yield pystray.MenuItem("Interval", pystray.Menu(get_interval_items))
         yield pystray.MenuItem("Mode", pystray.Menu(get_mode_items))
